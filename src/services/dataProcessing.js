@@ -3,7 +3,53 @@
  * Lógica de negocio ajustada para análisis espacial electoral.
  */
 
-import { toNumber, normalizeKey, isNumericColumn } from '../utils/helpers.js';
+import {
+  toNumber,
+  normalizeKey,
+  isNumericColumn,
+  getComuna,
+  getRecintoName,
+} from '../utils/helpers.js';
+
+/**
+ * Intenta adivinar una columna a partir de una lista de candidatos. Primero
+ * busca coincidencia exacta (sin distinguir mayúsculas) y luego parcial.
+ * Devuelve el nombre real de la columna o null.
+ */
+export function guessColumn(columns, candidates) {
+  if (!Array.isArray(columns) || !columns.length) return null;
+  const norm = columns.map((c) => ({ c, l: String(c).toLowerCase().trim() }));
+  for (const cand of candidates) {
+    const hit = norm.find((x) => x.l === cand.toLowerCase());
+    if (hit) return hit.c;
+  }
+  for (const cand of candidates) {
+    const hit = norm.find((x) => x.l.includes(cand.toLowerCase()));
+    if (hit) return hit.c;
+  }
+  return null;
+}
+
+/** Lista ordenada de comunas presentes en los features. */
+export function uniqueComunas(features) {
+  const set = new Set();
+  for (const f of features || []) {
+    const c = getComuna(f?.properties);
+    if (c) set.add(c);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+}
+
+/** Lista ordenada de nombres de recinto, opcionalmente acotada a una comuna. */
+export function uniqueRecintos(features, comuna) {
+  const set = new Set();
+  for (const f of features || []) {
+    if (comuna && getComuna(f?.properties) !== comuna) continue;
+    const n = getRecintoName(f?.properties);
+    if (n) set.add(n);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+}
 
 export const STATUS = {
   holgura: { color: '#16a34a', label: 'Con Espacio (Holgura)' },
@@ -37,7 +83,7 @@ export function filterByRegion(geojson, regionColumn, regionValue) {
 }
 
 export function joinExcel(features, excel, geoKeyColumn) {
-  const { rows, keyColumn, valueColumn } = excel;
+  const { rows, keyColumn, valueColumn, nameColumn, comunaColumn } = excel;
   const total = features.length;
   let matched = 0;
 
@@ -58,6 +104,9 @@ export function joinExcel(features, excel, geoKeyColumn) {
     if (!f.properties) f.properties = {};
     f.properties.__joinMatched = false;
     f.properties[targetProp] = null;
+    // Limpia atributos descriptivos de un cruce previo (re-ejecutable).
+    delete f.properties.__recintoNombre;
+    delete f.properties.__recintoComuna;
 
     const k = normalizeKey(f.properties?.[geoKeyColumn]);
     if (k === null) continue;
@@ -66,6 +115,17 @@ export function joinExcel(features, excel, geoKeyColumn) {
     if (!row) continue;
 
     f.properties[targetProp] = row[valueColumn];
+
+    // Arrastra nombre y comuna del Excel (si se indicaron) para mostrarlos en
+    // las tarjetas y alimentar los filtros. Se guardan con prefijo `__` para
+    // no ensuciar la detección de campos numéricos.
+    if (nameColumn && row[nameColumn] != null && String(row[nameColumn]).trim() !== '') {
+      f.properties.__recintoNombre = String(row[nameColumn]).trim();
+    }
+    if (comunaColumn && row[comunaColumn] != null && String(row[comunaColumn]).trim() !== '') {
+      f.properties.__recintoComuna = String(row[comunaColumn]).trim();
+    }
+
     f.properties.__joinMatched = true;
     matched++;
   }
