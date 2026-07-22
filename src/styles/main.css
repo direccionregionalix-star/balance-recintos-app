@@ -547,6 +547,60 @@ body {
   display: none !important;
 }
 
+/* ------------------------- Bidireccionalidad Mapa ↔ Tabla ------------------------- */
+/* Encabezado de la tarjeta: Nombre del recinto + Comuna/ID como subtítulo. */
+.result-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.result-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.result-sub {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Tarjeta interactiva: invita al clic (Tabla → Mapa). */
+.result-card.is-clickable {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.result-card.is-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+  border-color: var(--status-color, var(--blue));
+}
+
+/* Resaltado temporal al llegar desde el mapa (Mapa → Tabla). */
+.result-card.card-flash {
+  animation: card-flash 1.6s ease;
+}
+@keyframes card-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.55);
+    background: #eff6ff;
+  }
+  30% {
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.35);
+    background: #eff6ff;
+  }
+  100% {
+    box-shadow: var(--shadow-sm);
+    background: var(--surface);
+  }
+}
+
 /* ------------------------- Responsive ------------------------- */
 @media (max-width: 900px) {
   #app {
