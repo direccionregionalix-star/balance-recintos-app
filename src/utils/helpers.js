@@ -95,3 +95,43 @@ export function slug(text) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
 }
+
+/**
+ * Busca en un objeto de propiedades (sin distinguir mayúsculas) el primer
+ * atributo que coincida con alguno de los candidatos. Devuelve su valor como
+ * string recortado, o null si ninguno tiene contenido.
+ */
+export function pickProp(properties, candidates) {
+  if (!properties) return null;
+  const lower = {};
+  for (const k of Object.keys(properties)) lower[k.toLowerCase()] = k;
+  for (const cand of candidates) {
+    const realKey = lower[cand.toLowerCase()];
+    if (realKey === undefined) continue;
+    const v = properties[realKey];
+    if (v !== null && v !== undefined && String(v).trim() !== '') return String(v).trim();
+  }
+  return null;
+}
+
+/**
+ * Nombre del recinto. Prioriza el nombre inyectado en el cruce
+ * (`__recintoNombre`) y luego atributos habituales del GeoJSON/Excel.
+ */
+export function getRecintoName(properties) {
+  return pickProp(properties, [
+    '__recintoNombre', 'recinto', 'nombre', 'nombre_recinto', 'nom_recinto',
+    'establecimiento', 'local', 'des_local', 'nombre_local',
+  ]);
+}
+
+/**
+ * Comuna del recinto. Revisa atributos comunes del GeoJSON y, como respaldo,
+ * la comuna traída del Excel en el cruce (`__recintoComuna`).
+ */
+export function getComuna(properties) {
+  return pickProp(properties, [
+    'comuna', 'nom_comuna', 'glosa_comu', 'nombre_comuna', 'des_comuna',
+    'municipio', '__recintoComuna',
+  ]);
+}
