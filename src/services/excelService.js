@@ -2,10 +2,11 @@
  * excelService.js
  * Envuelve SheetJS (xlsx) para leer archivos .xlsx/.csv y para exportar
  * el estado calculado a un .xlsx estructurado (Fase 3).
+ * Adaptado al nuevo motor de cálculo de escenarios electorales.
  */
 
 import * as XLSX from 'xlsx';
-import { getFeatureId, STATUS, OPERATORS } from './dataProcessing.js';
+import { getFeatureId, STATUS } from './dataProcessing.js';
 import { fmt } from '../utils/helpers.js';
 
 /**
@@ -41,41 +42,70 @@ export function readExcel(file) {
  * @param {Object} params
  * @param {Array}  params.features features filtrados y cruzados
  * @param {string} params.keyColumn llave primaria del GeoJSON
- * @param {Object} params.results   featureId -> { value, status, a, b }
- * @param {Object} params.calc      { varA, varB, operator }
+ * @param {Object} params.results   featureId -> { value, status, mesasFisicas, mesasRestantes, conteo }
+ * @param {Object} params.calc      { mode, varCapacidad, varConteo }
  * @param {Object} params.totals    agregados globales
  */
 export function exportResults({ features, keyColumn, results, calc, totals }) {
-  const opLabel = OPERATORS[calc.operator]?.label || calc.operator;
-
   // Hoja 1: detalle por recinto.
   const detail = features.map((f) => {
     const id = getFeatureId(f, keyColumn);
     const r = (id !== null && results[id]) || {};
-    return {
-      [keyColumn || 'ID']: id,
-      [`A · ${calc.varA || ''}`]: r.a ?? '',
-      [`B · ${calc.varB || ''}`]: r.b ?? '',
-      Operacion: opLabel,
-      Resultado: r.value ?? '',
-      Estado: STATUS[r.status]?.label || 'Sin dato',
+    
+    const baseRow = {
+      [keyColumn || 'Código Recinto']: id,
     };
+
+    // Intentamos extraer nombres o comunas si vienen en el GeoJSON
+    if (f.properties?.comuna || f.properties?.COMUNA) baseRow['Comuna'] = f.properties.comuna || f.properties.COMUNA;
+    if (f.properties?.recinto || f.properties?.nombre) baseRow['Nombre Recinto'] = f.properties.recinto || f.properties.nombre;
+
+    if (r.status === 'sinDato' || !r.status) {
+      return {
+        ...baseRow,
+        Estado: 'Sin dato',
+        'Valor / Balance': 'N/A'
+      };
+    }
+
+    if (calc.mode === 'symbology') {
+      return {
+        ...baseRow,
+        Estado: STATUS[r.status]?.label || 'Visualización',
+        [`Valor (${calc.varCapacidad})`]: r.value ?? '',
+      };
+    } else {
+      const prefijo = r.value > 0 ? '+' : '';
+      return {
+        ...baseRow,
+        Estado: STATUS[r.status]?.label || 'Sin dato',
+        'Capacidad Física (Mesas)': r.mesasFisicas ?? '',
+        'Conteo (Demanda)': r.conteo ?? '',
+        'Balance (Electores)': r.value !== null ? `${prefijo}${r.value}` : '',
+        'Espacio (Mesas)': r.mesasRestantes !== null ? `${prefijo}${fmt(r.mesasRestantes, 1)}` : '',
+      };
+    }
   });
 
   // Hoja 2: resumen agregado.
-  const summary = totals
-    ? [
-        { Metrica: 'Recintos calculados', Valor: totals.count },
-        { Metrica: `Suma A (${calc.varA || ''})`, Valor: totals.sumA },
-        { Metrica: `Suma B (${calc.varB || ''})`, Valor: totals.sumB },
-        { Metrica: 'Suma Resultado', Valor: totals.sumResult },
-        { Metrica: 'En holgura', Valor: totals.holgura },
-        { Metrica: 'En limite', Valor: totals.limite },
-        { Metrica: 'En sobrecupo/deficit', Valor: totals.sobrecupo },
-        { Metrica: 'Neutrales', Valor: totals.neutral },
-        { Metrica: 'Sin dato', Valor: totals.sinDato },
-      ]
-    : [{ Metrica: 'Sin calculo ejecutado', Valor: '' }];
+  let summary = [];
+  if (!totals) {
+    summary = [{ Métrica: 'Sin cálculo ejecutado', Valor: '' }];
+  } else if (calc.mode === 'symbology') {
+    summary = [
+      { Métrica: 'Registros graficados', Valor: totals.count },
+      { Métrica: 'Sin dato', Valor: totals.sinDato },
+    ];
+  } else {
+    summary = [
+      { Métrica: 'Recintos evaluados', Valor: totals.count },
+      { Métrica: 'Recintos con espacio (Holgura)', Valor: totals.holgura },
+      { Métrica: 'Recintos al límite', Valor: totals.limite },
+      { Métrica: 'Recintos colapsados (Déficit)', Valor: totals.sobrecupo },
+      { Métrica: 'Recintos sin dato', Valor: totals.sinDato },
+      { Métrica: 'Balance Global (Electores)', Valor: totals.sumBalance },
+    ];
+  }
 
   const wb = XLSX.utils.book_new();
   const wsDetail = XLSX.utils.json_to_sheet(detail);
@@ -89,7 +119,7 @@ export function exportResults({ features, keyColumn, results, calc, totals }) {
   XLSX.writeFile(wb, `balance_recintos_${stamp}.xlsx`);
 }
 
-/** Ajusta el ancho de columnas segun el contenido mas largo. */
+/** Ajusta el ancho de columnas según el contenido más largo. */
 function autoWidth(ws, rows) {
   if (!rows.length) return;
   const cols = Object.keys(rows[0]);
@@ -104,5 +134,5 @@ function autoWidth(ws, rows) {
   });
 }
 
-// Re-export util de formato por conveniencia de otros modulos si lo requieren.
+// Re-export util de formato por conveniencia de otros módulos si lo requieren.
 export { fmt };
