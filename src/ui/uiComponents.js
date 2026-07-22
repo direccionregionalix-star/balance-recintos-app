@@ -1,13 +1,11 @@
 /**
  * uiComponents.js
- * Fabrica de componentes de UI reutilizables (sin framework). Cada helper
- * devuelve un elemento DOM o una pequeña API para manipularlo. Mantiene el
- * markup consistente y las clases alineadas con el CSS.
+ * Fabrica de componentes de UI reutilizables (sin framework)[cite: 2]. Cada helper
+ * devuelve un elemento DOM o una pequeña API para manipularlo[cite: 2].
  */
 
 import { escapeHtml, slug } from '../utils/helpers.js';
 
-/** Crea una tarjeta/seccion colapsable con titulo, paso y cuerpo. */
 export function createSection({ step, title, subtitle }) {
   const section = el('section', 'card section');
   section.innerHTML = `
@@ -24,7 +22,6 @@ export function createSection({ step, title, subtitle }) {
   return { section, body };
 }
 
-/** Input de archivo estilizado. */
 export function createFileInput({ id, label, accept, onChange }) {
   const wrap = el('div', 'field');
   wrap.innerHTML = `
@@ -45,7 +42,6 @@ export function createFileInput({ id, label, accept, onChange }) {
   return { wrap, input, setText: (t) => (text.textContent = t) };
 }
 
-/** Desplegable (select) con etiqueta. */
 export function createSelect({ id, label, options = [], value, onChange, placeholder }) {
   const wrap = el('div', 'field');
   const optHtml = [
@@ -68,7 +64,18 @@ export function createSelect({ id, label, options = [], value, onChange, placeho
   return { wrap, select };
 }
 
-/** Boton generico. */
+// NUEVO: Input de texto para los filtros
+export function createInput({ id, label, type = 'text', placeholder, value, onChange }) {
+  const wrap = el('div', 'field');
+  wrap.innerHTML = `
+    <label class="field-label" for="${id}">${escapeHtml(label)}</label>
+    <input type="${type}" id="${id}" class="select" placeholder="${escapeHtml(placeholder || '')}" value="${escapeHtml(String(value || ''))}" style="padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit; width: 100%; box-sizing: border-box;" />
+  `;
+  const input = wrap.querySelector('input');
+  input.addEventListener('input', (e) => onChange?.(e.target.value));
+  return { wrap, input };
+}
+
 export function createButton({ label, variant = 'primary', onClick, disabled, id }) {
   const btn = el('button', `btn btn-${variant}`);
   if (id) btn.id = id;
@@ -78,16 +85,13 @@ export function createButton({ label, variant = 'primary', onClick, disabled, id
   return btn;
 }
 
-/** Tarjeta de resultado por recinto (Fase 2). */
 export function resultCard({ id, value, status, statusLabel, color, a, b, aLabel, bLabel }) {
   const card = el('div', `result-card status-${status}`);
   card.style.setProperty('--status-color', color);
   card.innerHTML = `
     <div class="result-top">
       <span class="result-id">${escapeHtml(String(id))}</span>
-      <span class="result-chip" style="background:${color}22;color:${color}">${escapeHtml(
-    statusLabel
-  )}</span>
+      <span class="result-chip" style="background:${color}22;color:${color}">${escapeHtml(statusLabel)}</span>
     </div>
     <div class="result-value">${value}</div>
     <div class="result-meta">
@@ -98,7 +102,6 @@ export function resultCard({ id, value, status, statusLabel, color, a, b, aLabel
   return card;
 }
 
-/** Tarjeta de metrica global (KPI). */
 export function statTile({ label, value, color }) {
   const t = el('div', 'stat-tile');
   if (color) t.style.setProperty('--tile-color', color);
@@ -109,7 +112,6 @@ export function statTile({ label, value, color }) {
   return t;
 }
 
-/** Muestra un toast temporal. type: info | success | warn | error */
 export function showToast(message, type = 'info', ms = 3600) {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -123,7 +125,6 @@ export function showToast(message, type = 'info', ms = 3600) {
   }, ms);
 }
 
-/** Crea un elemento con clase. */
 export function el(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
