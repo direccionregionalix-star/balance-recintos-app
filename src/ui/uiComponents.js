@@ -4,7 +4,7 @@
  * devuelve un elemento DOM o una pequeña API para manipularlo[cite: 2].
  */
 
-import { escapeHtml, slug } from '../utils/helpers.js';
+import { escapeHtml, slug, getRecintoName, getComuna } from '../utils/helpers.js';
 
 export function createSection({ step, title, subtitle }) {
   const section = el('section', 'card section');
@@ -86,35 +86,13 @@ export function createButton({ label, variant = 'primary', onClick, disabled, id
 }
 
 /**
- * Busca en las propiedades del feature (sin importar mayúsculas) el primer
- * atributo que coincida con alguno de los candidatos. Devuelve su valor o null.
- */
-export function pickProp(properties, candidates) {
-  if (!properties) return null;
-  // Índice case-insensitive de las llaves presentes.
-  const lower = {};
-  for (const k of Object.keys(properties)) lower[k.toLowerCase()] = k;
-  for (const cand of candidates) {
-    const realKey = lower[cand.toLowerCase()];
-    if (realKey === undefined) continue;
-    const v = properties[realKey];
-    if (v !== null && v !== undefined && String(v).trim() !== '') return String(v).trim();
-  }
-  return null;
-}
-
-/**
  * Deriva el título (nombre del recinto) y subtítulo (comuna · ID) a partir de
- * las propiedades del GeoJSON. El ID queda como referencia secundaria.
+ * las propiedades del feature (incluye lo traído del Excel en el cruce).
+ * El ID queda como referencia secundaria.
  */
 export function recintoLabels(properties, id) {
-  const nombre = pickProp(properties, [
-    'nombre', 'recinto', 'nombre_recinto', 'nom_recinto', 'local',
-    'establecimiento', 'nombre_local', 'des_local',
-  ]);
-  const comuna = pickProp(properties, [
-    'comuna', 'nom_comuna', 'nombre_comuna', 'municipio', 'des_comuna',
-  ]);
+  const nombre = getRecintoName(properties);
+  const comuna = getComuna(properties);
   const title = nombre || comuna || `Recinto ${id}`;
   const parts = [];
   if (comuna && comuna !== title) parts.push(comuna);

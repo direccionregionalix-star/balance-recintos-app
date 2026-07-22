@@ -4,9 +4,16 @@
  */
 
 import { getState, setState, patchBranch, subscribe } from '../state/store.js';
-import { createSection, createSelect, createButton, createInput, resultCard, statTile, showToast, el } from './uiComponents.js';
-import { runCalculation, getFeatureId, STATUS, aggregateSubset } from '../services/dataProcessing.js';
-import { fmt } from '../utils/helpers.js';
+import { createSection, createSelect, createButton, resultCard, statTile, showToast, el } from './uiComponents.js';
+import {
+  runCalculation,
+  getFeatureId,
+  STATUS,
+  aggregateSubset,
+  uniqueComunas,
+  uniqueRecintos,
+} from '../services/dataProcessing.js';
+import { fmt, escapeHtml, getComuna, getRecintoName } from '../utils/helpers.js';
 import {
   applyResultStyles,
   filterMapVisibility,
@@ -120,15 +127,34 @@ export function mountPhase2(container) {
     filtersContainer.innerHTML = '<h4 style="margin:0 0 10px 0; font-size:0.9rem; color:#0f172a;">Filtros de Búsqueda</h4>';
     const st = getState();
 
-    const searchInput = createInput({
-      id: 'view-filter-text',
-      label: 'Buscar Comuna / Recinto',
-      placeholder: 'Ej: Valdivia o San Pablo',
-      value: st.viewFilters.textSearch,
+    // Desplegable de Comuna: se llena leyendo las comunas presentes.
+    const comunas = uniqueComunas(st.filteredFeatures);
+    const comunaSelect = createSelect({
+      id: 'view-filter-comuna',
+      label: 'Comuna',
+      options: comunas.map((c) => ({ value: c, label: c })),
+      value: st.viewFilters.comuna,
+      placeholder: 'Todas las comunas',
       onChange: (v) => {
-        patchBranch('viewFilters', { textSearch: v });
+        // Al cambiar la comuna, se reinicia el recinto y se recargan sus opciones.
+        patchBranch('viewFilters', { comuna: v, recinto: '' });
+        rebuildRecintoOptions();
         applyViewFilters();
-      }
+      },
+    });
+
+    // Desplegable de Recinto: acotado a la comuna seleccionada.
+    const recintos = uniqueRecintos(st.filteredFeatures, st.viewFilters.comuna);
+    const recintoSelect = createSelect({
+      id: 'view-filter-recinto',
+      label: 'Recinto',
+      options: recintos.map((r) => ({ value: r, label: r })),
+      value: st.viewFilters.recinto,
+      placeholder: 'Todos los recintos',
+      onChange: (v) => {
+        patchBranch('viewFilters', { recinto: v });
+        applyViewFilters();
+      },
     });
 
     const statusSelect = createSelect({
@@ -138,18 +164,32 @@ export function mountPhase2(container) {
         { value: 'holgura', label: 'Con Espacio (Holgura)' },
         { value: 'limite', label: 'Al Límite' },
         { value: 'sobrecupo', label: 'Déficit (Sobrecupo)' },
-        { value: 'sinDato', label: 'Sin Dato' }
+        { value: 'sinDato', label: 'Sin Dato' },
       ],
       value: st.viewFilters.statusFilter,
       placeholder: 'Todos los estados',
       onChange: (v) => {
         patchBranch('viewFilters', { statusFilter: v });
         applyViewFilters();
-      }
+      },
     });
 
-    filtersContainer.append(searchInput.wrap, statusSelect.wrap);
+    filtersContainer.append(comunaSelect.wrap, recintoSelect.wrap, statusSelect.wrap);
     filtersContainer.style.display = 'block';
+    filtersContainer.__recintoSelect = recintoSelect.select;
+  }
+
+  /** Recarga las opciones del desplegable de Recinto según la comuna elegida. */
+  function rebuildRecintoOptions() {
+    const sel = filtersContainer.__recintoSelect;
+    if (!sel) return;
+    const st = getState();
+    const recintos = uniqueRecintos(st.filteredFeatures, st.viewFilters.comuna);
+    sel.innerHTML =
+      '<option value="">Todos los recintos</option>' +
+      recintos
+        .map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`)
+        .join('');
   }
 
   function calculate() {
@@ -200,9 +240,9 @@ export function mountPhase2(container) {
   }
 
   /**
-   * Calcula las filas visibles aplicando los filtros de vista (texto + estado)
-   * y las ordena por severidad. Devuelve tanto las filas como la lista de ids,
-   * que se reutiliza para recalcular KPIs y filtrar el mapa.
+   * Calcula las filas visibles aplicando los filtros de vista (comuna +
+   * recinto + estado) y las ordena por severidad. Devuelve tanto las filas
+   * como la lista de ids, que se reutiliza para recalcular KPIs y filtrar el mapa.
    */
   function computeFilteredRows(st) {
     const { filteredFeatures, filters, results, viewFilters } = st;
@@ -212,16 +252,14 @@ export function mountPhase2(container) {
       .map((f) => ({ f, id: getFeatureId(f, filters.keyColumn) }))
       .filter((x) => x.id !== null && results[x.id]);
 
+    if (viewFilters.comuna) {
+      rows = rows.filter((x) => getComuna(x.f.properties) === viewFilters.comuna);
+    }
+    if (viewFilters.recinto) {
+      rows = rows.filter((x) => getRecintoName(x.f.properties) === viewFilters.recinto);
+    }
     if (viewFilters.statusFilter) {
       rows = rows.filter((x) => results[x.id].status === viewFilters.statusFilter);
-    }
-
-    if (viewFilters.textSearch) {
-      const q = viewFilters.textSearch.toLowerCase();
-      rows = rows.filter((x) => {
-        const raw = Object.values(x.f.properties || {}).join(' ').toLowerCase();
-        return raw.includes(q);
-      });
     }
 
     rows.sort((a, b) => order[results[a.id].status] - order[results[b.id].status]);
@@ -238,7 +276,7 @@ export function mountPhase2(container) {
     if (!st.calc.done) return;
 
     const { rows, ids } = computeFilteredRows(st);
-    const active = !!(st.viewFilters.textSearch || st.viewFilters.statusFilter);
+    const active = !!(st.viewFilters.comuna || st.viewFilters.recinto || st.viewFilters.statusFilter);
 
     // KPIs: reflejan únicamente la selección actual cuando hay filtro activo.
     const totalsToShow = active ? aggregateSubset(st.results, ids) : st.totals;

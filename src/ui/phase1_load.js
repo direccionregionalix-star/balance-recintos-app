@@ -17,6 +17,7 @@ import {
   uniqueValues,
   filterByRegion,
   joinExcel,
+  guessColumn,
 } from '../services/dataProcessing.js';
 import { readExcel } from '../services/excelService.js';
 import { renderFeatures } from '../services/mapService.js';
@@ -81,7 +82,16 @@ export function mountPhase1(container) {
         results: {},
         totals: null,
       });
-      patchBranch('filters', { regionColumn: null, regionValue: null, keyColumn: null });
+      // Auto-detección: intenta preseleccionar las columnas habituales.
+      // Siguen siendo editables por si el archivo usa otros nombres.
+      const regionColumn = guessColumn(geoProps, [
+        'glosa_regi', 'glosa_region', 'region', 'nom_region', 'nombre_region', 'cod_region',
+      ]);
+      const keyColumn = guessColumn(geoProps, [
+        'cod_recint', 'cod_recinto', 'codigo_recinto', 'cod_rec', 'codigo_rec',
+        'id_recinto', 'codigo', 'id',
+      ]);
+      patchBranch('filters', { regionColumn, regionValue: null, keyColumn });
       showToast(`GeoJSON cargado: ${geojson.features.length} features.`, 'success');
       renderGeoControls(geoControls);
     } catch (err) {
@@ -98,7 +108,21 @@ export function mountPhase1(container) {
         showToast('El Excel no contiene columnas legibles.', 'warn');
         return;
       }
-      patchBranch('excel', { columns, rows, keyColumn: null, valueColumn: null });
+      // Auto-detección de columnas del Excel (editables).
+      const keyColumn = guessColumn(columns, [
+        'cod_rec', 'codigo_rec', 'cod_recinto', 'codigo_recinto', 'cod_recint',
+        'codigo', 'cod', 'id_recinto', 'id',
+      ]);
+      const valueColumn = guessColumn(columns, [
+        'capacidad real', 'capacidad_real', 'capacidad', 'cap_real', 'neto', 'cap',
+      ]);
+      const nameColumn = guessColumn(columns, [
+        'recinto', 'nombre', 'nombre_recinto', 'establecimiento', 'local',
+      ]);
+      const comunaColumn = guessColumn(columns, [
+        'comuna', 'nom_comuna', 'nombre_comuna',
+      ]);
+      patchBranch('excel', { columns, rows, keyColumn, valueColumn, nameColumn, comunaColumn });
       setState({ joined: false, results: {}, totals: null });
       showToast(`Excel cargado: ${rows.length} filas.`, 'success');
       renderExcelControls(xlsControls);
@@ -165,9 +189,21 @@ export function mountPhase1(container) {
     const st = getState();
     const col = st.filters.regionColumn;
     const values = col ? uniqueValues(st.geojson, col) : [];
+
+    // Si hay una sola región posible, la damos por defecto (editable).
+    if (values.length === 1 && !st.filters.regionValue) {
+      patchBranch('filters', { regionValue: values[0] });
+    }
+    const current = getState().filters.regionValue || '';
+
     sel.innerHTML =
       '<option value="">— Todas —</option>' +
-      values.map((v) => `<option value="${v}">${v}</option>`).join('');
+      values
+        .map(
+          (v) =>
+            `<option value="${v}" ${String(v) === String(current) ? 'selected' : ''}>${v}</option>`
+        )
+        .join('');
   }
 
   function applyFilter() {
@@ -225,13 +261,31 @@ export function mountPhase1(container) {
       onChange: (v) => patchBranch('excel', { valueColumn: v || null }),
     });
 
+    const nameCol = createSelect({
+      id: 'xls-name-col',
+      label: 'Columna de Nombre del recinto (opcional)',
+      placeholder: '— Ninguna —',
+      options: colOpts,
+      value: st.excel.nameColumn,
+      onChange: (v) => patchBranch('excel', { nameColumn: v || null }),
+    });
+
+    const comunaCol = createSelect({
+      id: 'xls-comuna-col',
+      label: 'Columna de Comuna (opcional)',
+      placeholder: '— Ninguna —',
+      options: colOpts,
+      value: st.excel.comunaColumn,
+      onChange: (v) => patchBranch('excel', { comunaColumn: v || null }),
+    });
+
     const joinBtn = createButton({
       label: 'Cruzar datos (JOIN)',
       variant: 'primary',
       onClick: doJoin,
     });
 
-    host.append(keyCol.wrap, valCol.wrap, joinBtn);
+    host.append(keyCol.wrap, valCol.wrap, nameCol.wrap, comunaCol.wrap, joinBtn);
   }
 
   function doJoin() {
