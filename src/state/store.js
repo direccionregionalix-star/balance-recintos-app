@@ -22,6 +22,8 @@ const initialState = () => ({
     columns: [],
     keyColumn: null,
     valueColumn: null,
+    nameColumn: null, // columna del Excel con el nombre del recinto
+    comunaColumn: null, // columna del Excel con la comuna
   },
   joined: false,
   joinStats: { matched: 0, total: 0 },
@@ -37,10 +39,11 @@ const initialState = () => ({
     done: false,
   },
   
-  // ---- NUEVO: Filtros de Vista ----
+  // ---- Filtros de Vista (desplegables en cascada) ----
   viewFilters: {
-    textSearch: '', // Para buscar por comuna o nombre de recinto
-    statusFilter: '', // Para aislar solo los "sobrecupo" o "holgura"
+    comuna: '', // comuna seleccionada
+    recinto: '', // recinto seleccionado (acotado por la comuna)
+    statusFilter: '', // aislar solo "sobrecupo" / "holgura" / etc.
   },
 
   results: {}, 
