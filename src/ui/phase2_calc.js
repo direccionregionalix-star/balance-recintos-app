@@ -5,9 +5,14 @@
 
 import { getState, setState, patchBranch, subscribe } from '../state/store.js';
 import { createSection, createSelect, createButton, createInput, resultCard, statTile, showToast, el } from './uiComponents.js';
-import { runCalculation, getFeatureId, STATUS } from '../services/dataProcessing.js';
+import { runCalculation, getFeatureId, STATUS, aggregateSubset } from '../services/dataProcessing.js';
 import { fmt } from '../utils/helpers.js';
-import { applyResultStyles } from '../services/mapService.js';
+import {
+  applyResultStyles,
+  filterMapVisibility,
+  focusFeature,
+  setResultsHost,
+} from '../services/mapService.js';
 import { renderLegend } from './phase4_spatial.js';
 
 export function mountPhase2(container) {
@@ -35,7 +40,12 @@ export function mountPhase2(container) {
   const resultsHead = el('div', 'results-head hidden');
   resultsHead.innerHTML = '<span>Estado por recinto</span>';
 
-  body.append(controls, dynamicInputs, filtersContainer, el('br'), kpis, resultsHead, resultsHost);
+  // Orden de jerarquía: controles → filtros → KPIs → lista de tarjetas.
+  // Los filtros quedan JUSTO ENCIMA de los KPI para que gobiernen la vista.
+  body.append(controls, dynamicInputs, filtersContainer, kpis, resultsHead, resultsHost);
+
+  // Enlace Mapa -> Tabla: el mapa necesita conocer este contenedor de tarjetas.
+  setResultsHost(resultsHost);
 
   let built = false;
 
@@ -117,7 +127,7 @@ export function mountPhase2(container) {
       value: st.viewFilters.textSearch,
       onChange: (v) => {
         patchBranch('viewFilters', { textSearch: v });
-        reRenderResults();
+        applyViewFilters();
       }
     });
 
@@ -134,7 +144,7 @@ export function mountPhase2(container) {
       placeholder: 'Todos los estados',
       onChange: (v) => {
         patchBranch('viewFilters', { statusFilter: v });
-        reRenderResults();
+        applyViewFilters();
       }
     });
 
@@ -162,11 +172,9 @@ export function mountPhase2(container) {
     setState({ results, totals });
     patchBranch('calc', { done: true });
 
-    applyResultStyles(results);
-    renderKpis(totals, st.calc.mode);
-
-    buildFilters(); 
-    reRenderResults(); 
+    applyResultStyles(results); // pinta el semaforo y memoriza resultados
+    buildFilters();
+    applyViewFilters(); // renderiza KPIs + tarjetas + mapa segun filtros activos
 
     renderLegend();
     showToast(`Ejecución lista. Si hay "Sin dato", revisa la consola (F12).`, 'success');
@@ -191,39 +199,70 @@ export function mountPhase2(container) {
     }
   }
 
-  function reRenderResults() {
-    const st = getState();
-    renderResults(st.filteredFeatures, st.filters.keyColumn, st.results, st.calc, st.viewFilters);
-  }
-
-  function renderResults(features, keyColumn, results, calc, viewFilters) {
-    resultsHost.innerHTML = '';
-    resultsHead.classList.remove('hidden');
-
+  /**
+   * Calcula las filas visibles aplicando los filtros de vista (texto + estado)
+   * y las ordena por severidad. Devuelve tanto las filas como la lista de ids,
+   * que se reutiliza para recalcular KPIs y filtrar el mapa.
+   */
+  function computeFilteredRows(st) {
+    const { filteredFeatures, filters, results, viewFilters } = st;
     const order = { sobrecupo: 0, limite: 1, neutral: 2, holgura: 3, sinDato: 4 };
 
-    // 1. Filtrado
-    let filteredRows = features
-      .map((f) => ({ f, id: getFeatureId(f, keyColumn) }))
+    let rows = filteredFeatures
+      .map((f) => ({ f, id: getFeatureId(f, filters.keyColumn) }))
       .filter((x) => x.id !== null && results[x.id]);
 
     if (viewFilters.statusFilter) {
-      filteredRows = filteredRows.filter(x => results[x.id].status === viewFilters.statusFilter);
+      rows = rows.filter((x) => results[x.id].status === viewFilters.statusFilter);
     }
 
     if (viewFilters.textSearch) {
       const q = viewFilters.textSearch.toLowerCase();
-      filteredRows = filteredRows.filter(x => {
-        const rawString = Object.values(x.f.properties).join(' ').toLowerCase();
-        return rawString.includes(q);
+      rows = rows.filter((x) => {
+        const raw = Object.values(x.f.properties || {}).join(' ').toLowerCase();
+        return raw.includes(q);
       });
     }
 
-    // 2. Ordenamiento
-    filteredRows.sort((a, b) => order[results[a.id].status] - order[results[b.id].status]);
+    rows.sort((a, b) => order[results[a.id].status] - order[results[b.id].status]);
+    return { rows, ids: rows.map((x) => x.id) };
+  }
+
+  /**
+   * Punto único de sincronización de la vista: recalcula KPIs con
+   * aggregateSubset, repinta las tarjetas y ajusta la visibilidad del mapa,
+   * todo según el subconjunto filtrado actual.
+   */
+  function applyViewFilters() {
+    const st = getState();
+    if (!st.calc.done) return;
+
+    const { rows, ids } = computeFilteredRows(st);
+    const active = !!(st.viewFilters.textSearch || st.viewFilters.statusFilter);
+
+    // KPIs: reflejan únicamente la selección actual cuando hay filtro activo.
+    const totalsToShow = active ? aggregateSubset(st.results, ids) : st.totals;
+    renderKpis(totalsToShow, st.calc.mode);
+
+    // Tarjetas.
+    renderResults(rows, st.calc, st.results);
+
+    // Mapa: aísla la selección (o restaura todo si no hay filtro).
+    filterMapVisibility(active ? ids : null);
+  }
+
+  function renderResults(rows, calc, results) {
+    resultsHost.innerHTML = '';
+    resultsHead.classList.remove('hidden');
+
+    if (rows.length === 0) {
+      resultsHost.innerHTML =
+        '<p style="text-align:center; color:#64748b; margin-top: 20px;">No hay recintos que coincidan con el filtro.</p>';
+      return;
+    }
 
     const frag = document.createDocumentFragment();
-    for (const { id } of filteredRows) {
+    for (const { f, id } of rows) {
       const r = results[id];
       const s = STATUS[r.status];
 
@@ -240,17 +279,21 @@ export function mountPhase2(container) {
 
       frag.appendChild(
         resultCard({
-          id, value: valText, status: r.status, statusLabel: s.label, color: s.color,
-          a: aText, b: bText, aLabel: 'Balance Mesas', bLabel: 'Realidad Recinto',
+          id,
+          properties: f.properties, // para derivar Nombre / Comuna
+          value: valText,
+          status: r.status,
+          statusLabel: s.label,
+          color: s.color,
+          a: aText,
+          b: bText,
+          aLabel: 'Balance Mesas',
+          bLabel: 'Realidad Recinto',
+          onClick: focusFeature, // enlace Tabla -> Mapa
         })
       );
     }
-
-    if (filteredRows.length === 0) {
-      resultsHost.innerHTML = '<p style="text-align:center; color:#64748b; margin-top: 20px;">No hay recintos que coincidan con el filtro.</p>';
-    } else {
-      resultsHost.appendChild(frag);
-    }
+    resultsHost.appendChild(frag);
   }
 
   subscribe((state) => {
