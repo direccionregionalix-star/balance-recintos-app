@@ -1,25 +1,11 @@
 /**
  * phase2_calc.js
- * Fase 2: Motor de calculo matematico. Selecciona dos variables numericas,
- * un operador, calcula el balance por recinto y repinta el mapa.
+ * Fase 2: Configuración de Escenarios Electorales y Simbología
  */
 
 import { getState, setState, patchBranch, subscribe } from '../state/store.js';
-import {
-  createSection,
-  createSelect,
-  createButton,
-  resultCard,
-  statTile,
-  showToast,
-  el,
-} from './uiComponents.js';
-import {
-  runCalculation,
-  getFeatureId,
-  STATUS,
-  OPERATORS,
-} from '../services/dataProcessing.js';
+import { createSection, createSelect, createButton, resultCard, statTile, showToast, el } from './uiComponents.js';
+import { runCalculation, getFeatureId, STATUS } from '../services/dataProcessing.js';
 import { fmt } from '../utils/helpers.js';
 import { applyResultStyles } from '../services/mapService.js';
 import { renderLegend } from './phase4_spatial.js';
@@ -27,19 +13,20 @@ import { renderLegend } from './phase4_spatial.js';
 export function mountPhase2(container) {
   const { section, body } = createSection({
     step: 2,
-    title: 'Motor de calculo',
-    subtitle: 'Balance por recinto y semaforo espacial',
+    title: 'Análisis de Capacidad',
+    subtitle: 'Simulación de escenarios y simbología',
   });
   section.classList.add('locked');
   container.appendChild(section);
 
   const controls = el('div', 'dynamic');
+  const dynamicInputs = el('div', 'dynamic-inputs');
   const kpis = el('div', 'kpi-grid');
   const resultsHost = el('div', 'results-list');
   const resultsHead = el('div', 'results-head hidden');
-  resultsHead.innerHTML = '<span>Balance por recinto</span>';
+  resultsHead.innerHTML = '<span>Estado por recinto</span>';
 
-  body.append(controls, kpis, resultsHead, resultsHost);
+  body.append(controls, dynamicInputs, el('br'), kpis, resultsHead, resultsHost);
 
   let built = false;
 
@@ -47,92 +34,114 @@ export function mountPhase2(container) {
     controls.innerHTML = '';
     const st = getState();
     const numOpts = st.numericFields.map((f) => ({ value: f, label: f }));
-    const opOpts = Object.entries(OPERATORS).map(([value, o]) => ({
-      value,
-      label: o.label,
-    }));
+    
+    // Iniciar con valores por defecto si no existen
+    if (!st.calc.mode) patchBranch('calc', { mode: 'electoral', electorsPerTable: 400, isTables: false });
 
-    const varA = createSelect({
-      id: 'calc-var-a',
-      label: 'Variable A',
-      placeholder: '— Selecciona —',
-      options: numOpts,
-      value: st.calc.varA,
-      onChange: (v) => patchBranch('calc', { varA: v || null }),
-    });
-    const varB = createSelect({
-      id: 'calc-var-b',
-      label: 'Variable B',
-      placeholder: '— Selecciona —',
-      options: numOpts,
-      value: st.calc.varB,
-      onChange: (v) => patchBranch('calc', { varB: v || null }),
-    });
-    const op = createSelect({
-      id: 'calc-op',
-      label: 'Operador',
-      options: opOpts,
-      value: st.calc.operator,
-      onChange: (v) => patchBranch('calc', { operator: v || 'subtract' }),
-    });
-    const btn = createButton({
-      label: 'Calcular balance',
-      variant: 'primary',
-      onClick: calculate,
+    const modeSelect = createSelect({
+      id: 'calc-mode', label: 'Modo de Análisis',
+      options: [
+        { value: 'electoral', label: 'Evaluar Escenario (Balance)' },
+        { value: 'symbology', label: 'Solo Explorar Simbología' }
+      ],
+      value: st.calc.mode,
+      onChange: (v) => {
+        patchBranch('calc', { mode: v });
+        renderDynamicInputs(numOpts);
+      },
     });
 
-    controls.append(varA.wrap, varB.wrap, op.wrap, btn);
+    controls.append(modeSelect.wrap);
+    renderDynamicInputs(numOpts);
     built = true;
+  }
+
+  function renderDynamicInputs(numOpts) {
+    dynamicInputs.innerHTML = '';
+    const st = getState();
+    const mode = st.calc.mode;
+
+    const varCap = createSelect({
+      id: 'calc-var-cap', label: mode === 'symbology' ? 'Variable a visualizar' : 'Capacidad Base (Neto / Real)',
+      options: numOpts, value: st.calc.varCapacidad,
+      onChange: (v) => patchBranch('calc', { varCapacidad: v || null }),
+    });
+    dynamicInputs.append(varCap.wrap);
+
+    if (mode === 'electoral') {
+      const typeCap = createSelect({
+        id: 'calc-is-tables', label: '¿La capacidad está en...?',
+        options: [{ value: 'false', label: 'Electores' }, { value: 'true', label: 'Mesas' }],
+        value: String(st.calc.isTables || false),
+        onChange: (v) => patchBranch('calc', { isTables: v === 'true' }),
+      });
+
+      const varConteo = createSelect({
+        id: 'calc-var-conteo', label: 'Demanda (Conteo última elección)',
+        options: numOpts, value: st.calc.varConteo,
+        onChange: (v) => patchBranch('calc', { varConteo: v || null }),
+      });
+
+      // HTML custom para el input del número de electores por mesa
+      const umbralWrap = el('div', 'input-wrap');
+      umbralWrap.innerHTML = `<label style="display:block; font-size:0.8rem; margin-bottom:4px; font-weight:600; color:#475569;">Electores por mesa (Escenario)</label>
+                              <input type="number" id="input-electors" value="${st.calc.electorsPerTable || 400}" 
+                              style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-family:inherit;">`;
+      
+      umbralWrap.querySelector('input').addEventListener('change', (e) => {
+        patchBranch('calc', { electorsPerTable: parseFloat(e.target.value) || 400 });
+      });
+
+      dynamicInputs.append(typeCap.wrap, varConteo.wrap, umbralWrap);
+    }
+
+    const btn = createButton({ label: 'Ejecutar', variant: 'primary', onClick: calculate });
+    dynamicInputs.append(btn);
   }
 
   function calculate() {
     const st = getState();
-    if (!st.calc.varA || !st.calc.varB) {
-      showToast('Selecciona las dos variables numericas.', 'warn');
-      return;
+    if (!st.calc.varCapacidad) {
+      showToast('Selecciona la variable principal.', 'warn'); return;
     }
-    if (st.calc.varA === st.calc.varB) {
-      showToast('Elige dos variables distintas.', 'warn');
-      return;
+    if (st.calc.mode === 'electoral' && !st.calc.varConteo) {
+      showToast('Para evaluar escenarios, selecciona la variable de conteo.', 'warn'); return;
     }
-    const { results, totals } = runCalculation(
-      st.filteredFeatures,
-      st.filters.keyColumn,
-      st.calc
-    );
+
+    const { results, totals } = runCalculation(st.filteredFeatures, st.filters.keyColumn, st.calc);
     setState({ results, totals });
     patchBranch('calc', { done: true });
 
-    applyResultStyles(results); // repinta el mapa
-    renderKpis(totals);
+    applyResultStyles(results);
+    renderKpis(totals, st.calc.mode);
     renderResults(st.filteredFeatures, st.filters.keyColumn, results, st.calc);
-    renderLegend(); // muestra la leyenda del semaforo
-    showToast(`Calculo listo: ${totals.count} recintos con resultado.`, 'success');
+    renderLegend();
+    showToast(`Ejecución lista.`, 'success');
   }
 
-  function renderKpis(totals) {
+  function renderKpis(totals, mode) {
     kpis.innerHTML = '';
     if (!totals) return;
-    kpis.append(
-      statTile({ label: 'Calculados', value: totals.count }),
-      statTile({ label: STATUS.holgura.label, value: totals.holgura, color: STATUS.holgura.color }),
-      statTile({ label: STATUS.limite.label, value: totals.limite, color: STATUS.limite.color }),
-      statTile({
-        label: 'Sobrecupo',
-        value: totals.sobrecupo,
-        color: STATUS.sobrecupo.color,
-      }),
-      statTile({ label: 'Suma resultado', value: fmt(totals.sumResult) }),
-      statTile({ label: 'Sin dato', value: totals.sinDato, color: STATUS.sinDato.color })
-    );
+    
+    if (mode === 'symbology') {
+      kpis.append(
+        statTile({ label: 'Registros graficados', value: totals.count }),
+        statTile({ label: 'Sin dato', value: totals.sinDato, color: STATUS.sinDato.color })
+      );
+    } else {
+      kpis.append(
+        statTile({ label: STATUS.holgura.label, value: totals.holgura, color: STATUS.holgura.color }),
+        statTile({ label: 'Déficit Crítico', value: totals.sobrecupo, color: STATUS.sobrecupo.color }),
+        statTile({ label: 'Balance Global', value: fmt(totals.sumBalance) }),
+        statTile({ label: 'Sin dato', value: totals.sinDato, color: STATUS.sinDato.color })
+      );
+    }
   }
 
   function renderResults(features, keyColumn, results, calc) {
     resultsHost.innerHTML = '';
     resultsHead.classList.remove('hidden');
-    const isPercent = calc.operator === 'percent';
 
-    // Ordena por severidad: primero sobrecupo, luego limite, luego holgura.
     const order = { sobrecupo: 0, limite: 1, neutral: 2, holgura: 3, sinDato: 4 };
     const rows = features
       .map((f) => ({ f, id: getFeatureId(f, keyColumn) }))
@@ -143,29 +152,28 @@ export function mountPhase2(container) {
     for (const { id } of rows) {
       const r = results[id];
       const s = STATUS[r.status];
+      
+      let valText, aText, bText;
+      if (calc.mode === 'symbology') {
+        valText = fmt(r.value);
+        aText = 'N/A'; bText = 'N/A';
+      } else {
+        const prefijo = r.value > 0 ? '+' : '';
+        valText = r.value === null ? '—' : `${prefijo}${fmt(r.value)} electores`;
+        aText = r.mesasRestantes === null ? '—' : `${prefijo}${fmt(r.mesasRestantes, 1)} mesas de espacio`;
+        bText = `Físicas: ${r.mesasFisicas} mesas`;
+      }
+
       frag.appendChild(
         resultCard({
-          id,
-          value:
-            r.value === null
-              ? '—'
-              : isPercent
-              ? `${fmt(r.value, 1)} %`
-              : fmt(r.value),
-          status: r.status,
-          statusLabel: s.label,
-          color: s.color,
-          a: fmt(r.a),
-          b: fmt(r.b),
-          aLabel: calc.varA,
-          bLabel: calc.varB,
+          id, value: valText, status: r.status, statusLabel: s.label, color: s.color,
+          a: aText, b: bText, aLabel: 'Balance Mesas', bLabel: 'Realidad Recinto',
         })
       );
     }
     resultsHost.appendChild(frag);
   }
 
-  // Habilita la fase cuando el cruce esta listo; refresca las variables.
   subscribe((state) => {
     if (state.joined && state.numericFields.length) {
       section.classList.remove('locked');
@@ -173,9 +181,7 @@ export function mountPhase2(container) {
     } else {
       section.classList.add('locked');
       built = false;
-      controls.innerHTML = '';
-      kpis.innerHTML = '';
-      resultsHost.innerHTML = '';
+      controls.innerHTML = ''; dynamicInputs.innerHTML = ''; kpis.innerHTML = ''; resultsHost.innerHTML = '';
       resultsHead.classList.add('hidden');
     }
   });
