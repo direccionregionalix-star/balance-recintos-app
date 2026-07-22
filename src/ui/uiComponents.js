@@ -85,12 +85,63 @@ export function createButton({ label, variant = 'primary', onClick, disabled, id
   return btn;
 }
 
-export function resultCard({ id, value, status, statusLabel, color, a, b, aLabel, bLabel }) {
+/**
+ * Busca en las propiedades del feature (sin importar mayúsculas) el primer
+ * atributo que coincida con alguno de los candidatos. Devuelve su valor o null.
+ */
+export function pickProp(properties, candidates) {
+  if (!properties) return null;
+  // Índice case-insensitive de las llaves presentes.
+  const lower = {};
+  for (const k of Object.keys(properties)) lower[k.toLowerCase()] = k;
+  for (const cand of candidates) {
+    const realKey = lower[cand.toLowerCase()];
+    if (realKey === undefined) continue;
+    const v = properties[realKey];
+    if (v !== null && v !== undefined && String(v).trim() !== '') return String(v).trim();
+  }
+  return null;
+}
+
+/**
+ * Deriva el título (nombre del recinto) y subtítulo (comuna · ID) a partir de
+ * las propiedades del GeoJSON. El ID queda como referencia secundaria.
+ */
+export function recintoLabels(properties, id) {
+  const nombre = pickProp(properties, [
+    'nombre', 'recinto', 'nombre_recinto', 'nom_recinto', 'local',
+    'establecimiento', 'nombre_local', 'des_local',
+  ]);
+  const comuna = pickProp(properties, [
+    'comuna', 'nom_comuna', 'nombre_comuna', 'municipio', 'des_comuna',
+  ]);
+  const title = nombre || comuna || `Recinto ${id}`;
+  const parts = [];
+  if (comuna && comuna !== title) parts.push(comuna);
+  if (id !== null && id !== undefined) parts.push(`ID: ${id}`);
+  return { title, subtitle: parts.join(' · ') };
+}
+
+/**
+ * Tarjeta de resultado por recinto. Muestra Nombre + Comuna como encabezado y
+ * el ID como subtítulo. Si se pasa `onClick`, la tarjeta es interactiva y
+ * expone `data-recinto-id` para el enlace bidireccional Mapa ↔ Tabla.
+ */
+export function resultCard({
+  id, properties, value, status, statusLabel, color, a, b, aLabel, bLabel, onClick,
+}) {
   const card = el('div', `result-card status-${status}`);
   card.style.setProperty('--status-color', color);
+  card.dataset.recintoId = id;
+
+  const { title, subtitle } = recintoLabels(properties, id);
+
   card.innerHTML = `
     <div class="result-top">
-      <span class="result-id">${escapeHtml(String(id))}</span>
+      <div class="result-titles">
+        <span class="result-name">${escapeHtml(title)}</span>
+        ${subtitle ? `<span class="result-sub">${escapeHtml(subtitle)}</span>` : ''}
+      </div>
       <span class="result-chip" style="background:${color}22;color:${color}">${escapeHtml(statusLabel)}</span>
     </div>
     <div class="result-value">${value}</div>
@@ -99,6 +150,11 @@ export function resultCard({ id, value, status, statusLabel, color, a, b, aLabel
       <span>${escapeHtml(bLabel)}: <b>${b}</b></span>
     </div>
   `;
+
+  if (typeof onClick === 'function') {
+    card.classList.add('is-clickable');
+    card.addEventListener('click', () => onClick(id));
+  }
   return card;
 }
 
