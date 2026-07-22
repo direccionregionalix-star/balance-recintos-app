@@ -16,7 +16,9 @@ let map = null;
 let geoLayer = null; // capa de recintos (GeoJSON)
 let drawnLayer = null; // ultimo poligono dibujado (Fase 4)
 let currentKeyColumn = null;
+let currentResults = null; // ultimo resultado del calculo (para recolorear)
 let onDrawEnd = null; // callback (geojsonPolygon) => void
+let resultsHostRef = null; // contenedor de tarjetas del panel (enlace Mapa -> Tabla)
 
 /** Inicializa el mapa base sobre un contenedor. */
 export function initMap(containerId = 'map') {
@@ -65,10 +67,96 @@ export function renderFeatures(features, keyColumn) {
       const id = getFeatureId(feature, keyColumn);
       layer.__recintoId = id;
       layer.bindPopup(buildPopup(feature, keyColumn));
+      // Enlace Mapa -> Tabla: al hacer clic en el poligono, desplazamos y
+      // destacamos la tarjeta correspondiente en el panel lateral.
+      layer.on('click', () => scrollToCard(id));
     },
   }).addTo(map);
 
   fitToLayer();
+}
+
+/** Registra el contenedor de tarjetas para el enlace Mapa -> Tabla. */
+export function setResultsHost(node) {
+  resultsHostRef = node;
+}
+
+/**
+ * Enlace Tabla -> Mapa: centra el mapa en el recinto indicado (flyToBounds /
+ * flyTo) y abre su popup automaticamente.
+ */
+export function focusFeature(id) {
+  if (!map || !geoLayer || id === null || id === undefined) return;
+  let target = null;
+  geoLayer.eachLayer((layer) => {
+    if (String(layer.__recintoId) === String(id)) target = layer;
+  });
+  if (!target) return;
+  try {
+    if (typeof target.getBounds === 'function') {
+      const b = target.getBounds();
+      if (b.isValid()) map.flyToBounds(b, { padding: [60, 60], maxZoom: 16, duration: 0.6 });
+    } else if (typeof target.getLatLng === 'function') {
+      map.flyTo(target.getLatLng(), Math.max(map.getZoom(), 15), { duration: 0.6 });
+    }
+  } catch {
+    /* omitir silenciosamente geometrias invalidas */
+  }
+  target.openPopup();
+}
+
+/** Enlace Mapa -> Tabla: desplaza y resalta la tarjeta del recinto. */
+function scrollToCard(id) {
+  if (!resultsHostRef || id === null || id === undefined) return;
+  const safe = String(id).replace(/"/g, '\\"');
+  const card = resultsHostRef.querySelector(`[data-recinto-id="${safe}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.add('card-flash');
+  setTimeout(() => card.classList.remove('card-flash'), 1600);
+}
+
+/**
+ * Filtrado de visibilidad del mapa (Fase 2). Deja visibles solo los recintos
+ * cuyos ids se pasan, atenua fuertemente el resto y hace fitBounds a la
+ * seleccion. Con `ids` nulo o vacio, restaura todos con su color por estado.
+ */
+export function filterMapVisibility(ids) {
+  if (!map || !geoLayer) return;
+  const set = ids && ids.length ? new Set(ids.map(String)) : null;
+  const selected = [];
+
+  geoLayer.eachLayer((layer) => {
+    const id = layer.__recintoId;
+    if (!set) {
+      // Sin filtro: color por estado y visibilidad plena.
+      const r = currentResults?.[id];
+      layer.setStyle(styleForStatus(r?.status || 'sinDato'));
+    } else if (set.has(String(id))) {
+      const r = currentResults?.[id];
+      layer.setStyle(styleForStatus(r?.status || 'sinDato'));
+      selected.push(layer);
+    } else {
+      // Fuera del filtro: atenuado casi transparente.
+      layer.setStyle({
+        color: '#94a3b8', weight: 1, opacity: 0.12,
+        fillColor: '#94a3b8', fillOpacity: 0.04,
+      });
+    }
+  });
+
+  if (set) {
+    if (selected.length) {
+      try {
+        const b = L.featureGroup(selected).getBounds();
+        if (b.isValid()) map.fitBounds(b, { padding: [40, 40], maxZoom: 15 });
+      } catch {
+        /* noop */
+      }
+    }
+  } else {
+    fitToLayer();
+  }
 }
 
 /** Ajusta el zoom a la extension de los recintos (fitBounds). */
@@ -88,6 +176,7 @@ export function fitToLayer() {
  */
 export function applyResultStyles(results) {
   if (!geoLayer) return;
+  currentResults = results; // memoriza para el filtrado de visibilidad
   geoLayer.eachLayer((layer) => {
     const id = layer.__recintoId;
     const r = id != null ? results[id] : null;
