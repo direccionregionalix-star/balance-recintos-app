@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Analisis espacial y balance de capacidad de recintos electorales" />
+    <title>Balance de Recintos · Analisis Espacial</title>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Panel del mapa (65%) -->
+      <section id="map-panel">
+        <div id="map"></div>
+        <!-- Cuadro resumen flotante para la seleccion espacial (Fase 4) -->
+        <div id="spatial-summary" class="floating-card hidden" aria-live="polite"></div>
+        <!-- Leyenda de estados -->
+        <div id="map-legend" class="floating-card legend hidden"></div>
+      </section>
+
+      <!-- Panel de control y resultados (35%) -->
+      <aside id="control-panel">
+        <header class="app-header">
+          <h1>Balance de Recintos</h1>
+          <p class="subtitle">Analisis espacial &amp; capacidad electoral</p>
+        </header>
+        <div id="panel-scroll"></div>
+      </aside>
+    </div>
+
+    <!-- Toast de notificaciones -->
+    <div id="toast-container" aria-live="assertive"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
