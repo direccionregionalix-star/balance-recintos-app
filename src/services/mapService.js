@@ -1,0 +1,256 @@
+/**
+ * mapService.js
+ * Encapsula toda la interaccion con Leaflet de forma imperativa. El resto de
+ * la app nunca toca la instancia del mapa directamente: solo llama estos
+ * metodos. Esto evita el acoplamiento y los problemas de reconciliacion.
+ */
+
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import '@geoman-io/leaflet-geoman-free';
+import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
+
+import { STATUS, getFeatureId } from './dataProcessing.js';
+
+let map = null;
+let geoLayer = null; // capa de recintos (GeoJSON)
+let drawnLayer = null; // ultimo poligono dibujado (Fase 4)
+let currentKeyColumn = null;
+let onDrawEnd = null; // callback (geojsonPolygon) => void
+
+/** Inicializa el mapa base sobre un contenedor. */
+export function initMap(containerId = 'map') {
+  if (map) return map;
+
+  map = L.map(containerId, {
+    center: [-33.45, -70.66], // Santiago, CL como vista inicial neutral
+    zoom: 5,
+    zoomControl: true,
+    preferCanvas: true, // mejor rendimiento con muchos poligonos
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap',
+  }).addTo(map);
+
+  initDrawTools();
+  return map;
+}
+
+export function getMap() {
+  return map;
+}
+
+/**
+ * Renderiza (o re-renderiza) los recintos filtrados en el mapa.
+ * @param {Array} features
+ * @param {string} keyColumn llave primaria para popups/estilos
+ */
+export function renderFeatures(features, keyColumn) {
+  if (!map) return;
+  currentKeyColumn = keyColumn;
+
+  if (geoLayer) {
+    geoLayer.remove();
+    geoLayer = null;
+  }
+  if (!features || !features.length) return;
+
+  const fc = { type: 'FeatureCollection', features };
+
+  geoLayer = L.geoJSON(fc, {
+    style: () => baseStyle(),
+    onEachFeature: (feature, layer) => {
+      const id = getFeatureId(feature, keyColumn);
+      layer.__recintoId = id;
+      layer.bindPopup(buildPopup(feature, keyColumn));
+    },
+  }).addTo(map);
+
+  fitToLayer();
+}
+
+/** Ajusta el zoom a la extension de los recintos (fitBounds). */
+export function fitToLayer() {
+  if (!map || !geoLayer) return;
+  try {
+    const b = geoLayer.getBounds();
+    if (b.isValid()) map.fitBounds(b, { padding: [30, 30] });
+  } catch {
+    /* omitir silenciosamente si la geometria es invalida */
+  }
+}
+
+/**
+ * Repinta cada recinto segun el resultado del calculo.
+ * @param {Object} results featureId -> { value, status }
+ */
+export function applyResultStyles(results) {
+  if (!geoLayer) return;
+  geoLayer.eachLayer((layer) => {
+    const id = layer.__recintoId;
+    const r = id != null ? results[id] : null;
+    const status = r?.status || 'sinDato';
+    layer.setStyle(styleForStatus(status));
+    // Actualiza el popup con el valor calculado.
+    if (layer.getPopup()) {
+      layer.setPopupContent(buildPopup(layer.feature, currentKeyColumn, r));
+    }
+  });
+}
+
+/** Resalta un subconjunto de recintos (seleccion espacial) y atenua el resto. */
+export function highlightSelection(ids) {
+  if (!geoLayer) return;
+  const set = new Set(ids);
+  geoLayer.eachLayer((layer) => {
+    const selected = set.has(layer.__recintoId);
+    if (!ids.length) {
+      layer.setStyle({ opacity: 1, fillOpacity: 0.55, weight: 1 });
+    } else if (selected) {
+      layer.setStyle({
+        color: STATUS.neutral.color,
+        weight: 3,
+        opacity: 1,
+        fillOpacity: 0.7,
+      });
+    } else {
+      layer.setStyle({ opacity: 0.25, fillOpacity: 0.12, weight: 1 });
+    }
+  });
+}
+
+/** Limpia el resaltado de seleccion, volviendo al estilo por resultado. */
+export function clearHighlight(results) {
+  if (results) applyResultStyles(results);
+  else if (geoLayer) geoLayer.eachLayer((l) => l.setStyle(baseStyle()));
+}
+
+// ---------------------------------------------------------------------------
+// Herramientas de dibujo (Leaflet-Geoman) — Fase 4
+// ---------------------------------------------------------------------------
+
+function initDrawTools() {
+  map.pm.addControls({
+    position: 'topleft',
+    drawMarker: false,
+    drawCircleMarker: false,
+    drawPolyline: false,
+    drawText: false,
+    drawCircle: false,
+    cutPolygon: false,
+    rotateMode: false,
+    drawRectangle: true,
+    drawPolygon: true,
+    editMode: true,
+    dragMode: false,
+    removalMode: true,
+  });
+  map.pm.setLang('es');
+
+  map.on('pm:create', (e) => {
+    // Solo mantenemos un poligono de seleccion a la vez.
+    if (drawnLayer) {
+      try {
+        drawnLayer.remove();
+      } catch {
+        /* noop */
+      }
+    }
+    drawnLayer = e.layer;
+    styleDrawn(drawnLayer);
+    emitDraw();
+
+    // Recalcular cuando el usuario edite el poligono.
+    drawnLayer.on('pm:edit', emitDraw);
+    drawnLayer.on('pm:dragend', emitDraw);
+  });
+
+  map.on('pm:remove', () => {
+    drawnLayer = null;
+    if (typeof onDrawEnd === 'function') onDrawEnd(null);
+  });
+}
+
+function styleDrawn(layer) {
+  if (layer.setStyle) {
+    layer.setStyle({
+      color: STATUS.neutral.color,
+      weight: 2,
+      dashArray: '6 4',
+      fillColor: STATUS.neutral.color,
+      fillOpacity: 0.08,
+    });
+  }
+}
+
+function emitDraw() {
+  if (!drawnLayer || typeof onDrawEnd !== 'function') return;
+  try {
+    const gj = drawnLayer.toGeoJSON();
+    onDrawEnd(gj);
+  } catch {
+    onDrawEnd(null);
+  }
+}
+
+/** Registra el callback que recibe el poligono dibujado (GeoJSON). */
+export function setOnDrawEnd(cb) {
+  onDrawEnd = cb;
+}
+
+/** Elimina el poligono de dibujo actual. */
+export function clearDrawn() {
+  if (drawnLayer) {
+    try {
+      drawnLayer.remove();
+    } catch {
+      /* noop */
+    }
+    drawnLayer = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Estilos y popups
+// ---------------------------------------------------------------------------
+
+function baseStyle() {
+  return {
+    color: '#64748b',
+    weight: 1,
+    opacity: 1,
+    fillColor: '#94a3b8',
+    fillOpacity: 0.35,
+  };
+}
+
+function styleForStatus(status) {
+  const c = STATUS[status]?.color || STATUS.sinDato.color;
+  return {
+    color: c,
+    weight: 1.2,
+    opacity: 1,
+    fillColor: c,
+    fillOpacity: 0.55,
+  };
+}
+
+function buildPopup(feature, keyColumn, result) {
+  const id = getFeatureId(feature, keyColumn);
+  let html = `<div class="popup"><strong>${keyColumn || 'ID'}:</strong> ${
+    id ?? '—'
+  }`;
+  if (result && result.value !== null && result.value !== undefined) {
+    const label = STATUS[result.status]?.label || '';
+    html += `<br><strong>Resultado:</strong> ${round(result.value)}`;
+    html += `<br><strong>Estado:</strong> ${label}`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function round(n) {
+  return Math.round(n * 100) / 100;
+}

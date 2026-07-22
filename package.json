@@ -1,0 +1,23 @@
+{
+  "name": "balance-recintos-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Aplicacion web de analisis espacial y balance de capacidad de recintos electorales.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "start": "serve -s dist -l ${PORT:-3000}"
+  },
+  "dependencies": {
+    "@geoman-io/leaflet-geoman-free": "^2.17.0",
+    "@turf/turf": "^7.1.0",
+    "leaflet": "^1.9.4",
+    "serve": "^14.2.4",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}
