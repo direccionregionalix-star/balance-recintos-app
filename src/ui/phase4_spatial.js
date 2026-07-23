@@ -130,7 +130,7 @@ export function renderLegend() {
   if (!box) return;
   box.innerHTML =
     '<div class="legend-title">Estados</div>' +
-    ['holgura', 'limite', 'sobrecupo', 'neutral', 'sinDato']
+    ['holgura', 'limite', 'sobrecupo', 'resuelto', 'neutral', 'sinDato']
       .map(
         (k) =>
           `<div class="legend-row"><span class="dot" style="background:${STATUS[k].color}"></span>${STATUS[k].label}</div>`

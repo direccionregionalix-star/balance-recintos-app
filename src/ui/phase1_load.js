@@ -122,7 +122,12 @@ export function mountPhase1(container) {
       const comunaColumn = guessColumn(columns, [
         'comuna', 'nom_comuna', 'nombre_comuna',
       ]);
-      patchBranch('excel', { columns, rows, keyColumn, valueColumn, nameColumn, comunaColumn });
+      // Coordenadas para ubicar el punto real del recinto en el mapa.
+      const latColumn = guessColumn(columns, ['latitud', 'lat', 'latitude', 'y']);
+      const lonColumn = guessColumn(columns, ['longitud', 'lon', 'lng', 'longitude', 'x']);
+      patchBranch('excel', {
+        columns, rows, keyColumn, valueColumn, nameColumn, comunaColumn, latColumn, lonColumn,
+      });
       setState({ joined: false, results: {}, totals: null });
       showToast(`Excel cargado: ${rows.length} filas.`, 'success');
       renderExcelControls(xlsControls);

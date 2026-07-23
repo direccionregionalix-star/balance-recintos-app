@@ -19,8 +19,10 @@ import {
   filterMapVisibility,
   focusFeature,
   setResultsHost,
+  renderPoints,
 } from '../services/mapService.js';
 import { renderLegend } from './phase4_spatial.js';
+import { openRecinto } from './recintoDetail.js';
 
 export function mountPhase2(container) {
   const { section, body } = createSection({
@@ -55,6 +57,7 @@ export function mountPhase2(container) {
   setResultsHost(resultsHost);
 
   let built = false;
+  let lastBackendVersion = 0; // para detectar cambios online y recalcular
 
   function buildControls() {
     controls.innerHTML = '';
@@ -208,16 +211,58 @@ export function mountPhase2(container) {
     console.table(st.filteredFeatures[0]?.properties);
     // --------------------------------
 
-    const { results, totals } = runCalculation(st.filteredFeatures, st.filters.keyColumn, st.calc);
+    const overrides = buildOverrides(st);
+    const { results, totals } = runCalculation(
+      st.filteredFeatures, st.filters.keyColumn, st.calc, overrides
+    );
     setState({ results, totals });
     patchBranch('calc', { done: true });
+    lastBackendVersion = getState().backendVersion;
 
+    // Re-renderiza los puntos de ubicación ahora que el cruce ya trajo las
+    // coordenadas (lat/lon) del Excel.
+    renderPoints(st.filteredFeatures, st.filters.keyColumn);
     applyResultStyles(results); // pinta el semaforo y memoriza resultados
     buildFilters();
     applyViewFilters(); // renderiza KPIs + tarjetas + mapa segun filtros activos
 
     renderLegend();
     showToast(`Ejecución lista. Si hay "Sin dato", revisa la consola (F12).`, 'success');
+  }
+
+  /**
+   * Construye el mapa de overrides (cod -> {capacidad_real, conteo, resuelto})
+   * a partir de las ediciones y observaciones online. `resuelto` se activa por
+   * un override manual o por cualquier observación marcada como solución.
+   */
+  function buildOverrides(st) {
+    const ed = st.backend?.ediciones || {};
+    const obs = st.backend?.observaciones || {};
+    const ov = {};
+    const ids = new Set([...Object.keys(ed), ...Object.keys(obs)]);
+    for (const id of ids) {
+      const e = ed[id] || {};
+      const tieneSolucion = (obs[id] || []).some((o) => o.es_solucion);
+      ov[id] = {
+        capacidad_real: e.capacidad_real ?? null,
+        conteo: e.conteo ?? null,
+        resuelto: e.estado_override === 'resuelto' || tieneSolucion,
+      };
+    }
+    return ov;
+  }
+
+  /** Recalcula con las ediciones online vigentes y refresca la vista. */
+  function recompute() {
+    const st = getState();
+    if (!st.calc.done) return;
+    const overrides = buildOverrides(st);
+    const { results, totals } = runCalculation(
+      st.filteredFeatures, st.filters.keyColumn, st.calc, overrides
+    );
+    setState({ results, totals });
+    applyResultStyles(results);
+    applyViewFilters();
   }
 
   function renderKpis(totals, mode) {
@@ -233,6 +278,7 @@ export function mountPhase2(container) {
       kpis.append(
         statTile({ label: STATUS.holgura.label, value: totals.holgura, color: STATUS.holgura.color }),
         statTile({ label: 'Déficit Crítico', value: totals.sobrecupo, color: STATUS.sobrecupo.color }),
+        statTile({ label: 'Con solución', value: totals.resuelto || 0, color: STATUS.resuelto.color }),
         statTile({ label: 'Balance Global', value: fmt(totals.sumBalance) }),
         statTile({ label: 'Sin dato', value: totals.sinDato, color: STATUS.sinDato.color })
       );
@@ -327,7 +373,11 @@ export function mountPhase2(container) {
           b: bText,
           aLabel: 'Balance Mesas',
           bLabel: 'Realidad Recinto',
-          onClick: focusFeature, // enlace Tabla -> Mapa
+          edited: !!r.overridden,
+          onClick: (rid) => {
+            focusFeature(rid); // enlace Tabla -> Mapa
+            openRecinto(rid); // abre la ficha (observaciones / edición)
+          },
         })
       );
     }
@@ -344,6 +394,12 @@ export function mountPhase2(container) {
       controls.innerHTML = ''; dynamicInputs.innerHTML = ''; kpis.innerHTML = ''; resultsHost.innerHTML = '';
       filtersContainer.style.display = 'none';
       resultsHead.classList.add('hidden');
+    }
+
+    // Recalcula cuando cambian las ediciones/observaciones online.
+    if (state.calc.done && state.backendVersion !== lastBackendVersion) {
+      lastBackendVersion = state.backendVersion;
+      recompute();
     }
   });
 }

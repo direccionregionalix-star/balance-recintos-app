@@ -7,13 +7,20 @@
 
 import './styles/main.css';
 
-import { initMap } from './services/mapService.js';
+import { getState, setState } from './state/store.js';
+import { initMap, setOnFeatureSelect } from './services/mapService.js';
 import { mountPhase1 } from './ui/phase1_load.js';
 import { mountPhase2 } from './ui/phase2_calc.js';
 import { mountPhase3 } from './ui/phase3_export.js';
 import { mountPhase4 } from './ui/phase4_spatial.js';
+import { mountRecintoDetail, openRecinto } from './ui/recintoDetail.js';
+import { fetchEdiciones, fetchObservaciones, backendDisponible } from './services/backendService.js';
+import { showToast } from './ui/uiComponents.js';
 
 function bootstrap() {
+  // 0) Identidad simple por sesión (para trazar quién edita/observa).
+  ensureSessionName();
+
   // 1) Mapa base.
   initMap('map');
 
@@ -24,10 +31,61 @@ function bootstrap() {
   mountPhase4(panel); // seleccion espacial
   mountPhase3(panel); // exportacion al final del flujo
 
+  // 3) Ficha del recinto (modal de observaciones/edición) + enlace desde el mapa.
+  mountRecintoDetail();
+  setOnFeatureSelect(openRecinto);
+
+  // 4) Carga inicial de datos colaborativos (no bloquea el arranque).
+  loadBackend();
+
   // Asegura que Leaflet calcule bien su tamaño tras el layout.
   window.requestAnimationFrame(() => {
     window.dispatchEvent(new Event('resize'));
   });
+}
+
+/** Pide (una vez) el nombre del funcionario y lo recuerda en el navegador. */
+function ensureSessionName() {
+  let nombre = '';
+  try {
+    nombre = localStorage.getItem('br_session_name') || '';
+  } catch {
+    /* localStorage no disponible */
+  }
+  if (!nombre) {
+    const input = window.prompt(
+      'Bienvenido/a a Balance de Recintos.\nEscribe tu nombre (queda registrado en tus observaciones y ediciones):',
+      ''
+    );
+    nombre = (input || '').trim();
+    try {
+      if (nombre) localStorage.setItem('br_session_name', nombre);
+    } catch {
+      /* noop */
+    }
+  }
+  setState({ session: { nombre: nombre || 'anónimo' } });
+}
+
+/** Trae ediciones y observaciones existentes y las deja en el store. */
+async function loadBackend() {
+  if (!backendDisponible) {
+    showToast('Sin backend: modo solo lectura local.', 'warn');
+    return;
+  }
+  try {
+    const [ediciones, observaciones] = await Promise.all([
+      fetchEdiciones(),
+      fetchObservaciones(),
+    ]);
+    const st = getState();
+    setState({
+      backend: { ediciones, observaciones },
+      backendVersion: st.backendVersion + 1,
+    });
+  } catch (err) {
+    console.warn('[main] loadBackend:', err);
+  }
 }
 
 if (document.readyState === 'loading') {
