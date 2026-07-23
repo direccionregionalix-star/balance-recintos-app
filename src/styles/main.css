@@ -802,6 +802,57 @@ body {
 }
 .fichas-matched .muted { color: var(--text-faint); }
 
+/* ------------------------- Propuestas (v1.4c) ------------------------- */
+/* Marcador rombo para recintos candidatos. */
+.prop-marker {
+  width: 14px;
+  height: 14px;
+  transform: rotate(45deg);
+  border: 2px solid #fff;
+  border-radius: 2px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.4);
+}
+
+/* Toggle del what-if. */
+.whatif-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6d28d9;
+  background: #faf5ff;
+  border: 1px solid #e9d5ff;
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.whatif-toggle input { width: auto; }
+
+/* Editor de alivio (recintos que descongestiona). */
+.alivio-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 32px;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.alivio-row input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.alivio-row button {
+  border: none;
+  background: var(--surface-2);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.alivio-row button:hover { background: #fee2e2; }
+
 /* ------------------------- Responsive ------------------------- */
 @media (max-width: 900px) {
   #app {

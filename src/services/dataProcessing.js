@@ -174,7 +174,7 @@ export function detectNumericFields(features) {
  *        Las ediciones online reemplazan los valores del archivo y `resuelto`
  *        fuerza el color/estado "Con solución propuesta".
  */
-export function runCalculation(features, keyColumn, calc, overrides = {}) {
+export function runCalculation(features, keyColumn, calc, overrides = {}, relief = {}) {
   const { mode, varCapacidad, isTables, varConteo, electorsPerTable } = calc;
   const results = {};
   const agg = {
@@ -208,13 +208,18 @@ export function runCalculation(features, keyColumn, calc, overrides = {}) {
     }
 
     // MODO ESCENARIO ELECTORAL
-    const conteo =
+    const conteoBase =
       ov && ov.conteo != null ? toNumber(ov.conteo) : toNumber(f.properties?.[varConteo]);
-    if (conteo === null) {
+    if (conteoBase === null) {
       results[id] = { value: null, status: 'sinDato', mesasRestantes: null, overridden: !!ov };
       agg.sinDato++;
       continue;
     }
+
+    // What-if: una propuesta 'aprobada' descongestiona este recinto trasladando
+    // `mesas` mesas de demanda (mesas × electores_por_mesa votantes) a otro local.
+    const reliefMesas = toNumber(relief?.[id]) || 0;
+    const conteo = reliefMesas > 0 ? Math.max(0, conteoBase - reliefMesas * electorsPerTable) : conteoBase;
 
     // Mesas físicas: el override es mesas directas; el archivo respeta el toggle.
     const mesasFisicas =
@@ -237,6 +242,8 @@ export function runCalculation(features, keyColumn, calc, overrides = {}) {
       mesasFisicas,
       mesasRestantes: balanceMesas,
       conteo,
+      conteoBase,
+      reliefMesas,
       overridden: !!(ov && (ov.capacidad_real != null || ov.conteo != null)),
     };
 

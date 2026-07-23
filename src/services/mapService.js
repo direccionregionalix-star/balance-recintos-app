@@ -11,18 +11,29 @@ import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 
 import { STATUS, getFeatureId } from './dataProcessing.js';
-import { getLat, getLon } from '../utils/helpers.js';
+import { getLat, getLon, normalizeCode } from '../utils/helpers.js';
 
 let map = null;
 let geoLayer = null; // capa de recintos (GeoJSON)
 let pointsLayer = null; // capa de puntos de ubicacion (coordenadas del recinto)
+let propuestasLayer = null; // capa de recintos candidatos (v1.4c)
+let linksLayer = null; // lineas propuesta -> recintos que descongestiona
 let drawnLayer = null; // ultimo poligono dibujado (Fase 4)
 let currentKeyColumn = null;
 let currentResults = null; // ultimo resultado del calculo (para recolorear)
 let onDrawEnd = null; // callback (geojsonPolygon) => void
 let onFeatureSelect = null; // callback (id) => void al seleccionar un recinto
+let onPropuestaSelect = null; // callback (propuestaId) => void
 let resultsHostRef = null; // contenedor de tarjetas del panel (enlace Mapa -> Tabla)
 let pointRenderer = null; // renderer SVG dedicado para los puntos de ubicacion
+
+// Colores por estado de propuesta.
+const PROP_COLOR = {
+  propuesto: '#64748b',
+  en_evaluacion: '#eab308',
+  aprobado: '#7c3aed',
+  descartado: '#cbd5e1',
+};
 
 /** Inicializa el mapa base sobre un contenedor. */
 export function initMap(containerId = 'map') {
@@ -125,6 +136,92 @@ export function setResultsHost(node) {
 /** Registra el callback que abre la ficha del recinto al seleccionarlo. */
 export function setOnFeatureSelect(cb) {
   onFeatureSelect = cb;
+}
+
+// ---------------------------------------------------------------------------
+// Propuestas de nuevos recintos (v1.4c)
+// ---------------------------------------------------------------------------
+
+export function setOnPropuestaSelect(cb) {
+  onPropuestaSelect = cb;
+}
+
+/** Dibuja las propuestas como rombos coloreados por estado. */
+export function renderPropuestas(propuestas) {
+  if (!map) return;
+  if (propuestasLayer) { propuestasLayer.remove(); propuestasLayer = null; }
+  clearPropuestaLinks();
+  const markers = [];
+  for (const p of propuestas || []) {
+    const lat = Number(p.lat);
+    const lon = Number(p.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue; // sin coord -> se omite
+    const color = PROP_COLOR[p.estado] || PROP_COLOR.propuesto;
+    const icon = L.divIcon({
+      className: 'prop-divicon',
+      html: `<div class="prop-marker" style="background:${color}"></div>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+    const m = L.marker([lat, lon], { icon });
+    m.__propuestaId = p.id;
+    m.bindTooltip(`${p.nombre} (${p.capacidad_mesas ?? '?'} mesas)`, { direction: 'top' });
+    m.on('click', () => {
+      if (typeof onPropuestaSelect === 'function') onPropuestaSelect(p.id);
+    });
+    markers.push(m);
+  }
+  if (markers.length) propuestasLayer = L.layerGroup(markers).addTo(map);
+}
+
+/**
+ * Dibuja líneas desde una propuesta hacia los recintos que descongestiona y
+ * centra la vista en ese conjunto.
+ */
+export function highlightPropuestaLinks(propuesta) {
+  clearPropuestaLinks();
+  if (!map || !propuesta) return;
+  const lat = Number(propuesta.lat);
+  const lon = Number(propuesta.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  const from = L.latLng(lat, lon);
+  const lines = [];
+  const pts = [from];
+  const alivio = Array.isArray(propuesta.alivio) ? propuesta.alivio : [];
+  for (const a of alivio) {
+    const center = recintoCenter(a.cod);
+    if (!center) continue;
+    lines.push(L.polyline([from, center], {
+      color: '#7c3aed', weight: 2, dashArray: '5 5', opacity: 0.9,
+    }));
+    pts.push(center);
+  }
+  lines.push(L.circleMarker(from, { radius: 7, color: '#7c3aed', weight: 2, fillColor: '#7c3aed', fillOpacity: 0.4 }));
+  linksLayer = L.layerGroup(lines).addTo(map);
+  try {
+    if (pts.length > 1) map.fitBounds(L.latLngBounds(pts), { padding: [60, 60], maxZoom: 14 });
+    else map.flyTo(from, Math.max(map.getZoom(), 13), { duration: 0.5 });
+  } catch { /* noop */ }
+}
+
+export function clearPropuestaLinks() {
+  if (linksLayer) { linksLayer.remove(); linksLayer = null; }
+}
+
+/** Centro aproximado del recinto cuyo código (tolerante a ceros) coincide. */
+function recintoCenter(cod) {
+  if (!geoLayer) return null;
+  const target = normalizeCode(cod);
+  let center = null;
+  geoLayer.eachLayer((layer) => {
+    if (center) return;
+    if (normalizeCode(layer.__recintoId) === target) {
+      try {
+        center = layer.getBounds ? layer.getBounds().getCenter() : layer.getLatLng();
+      } catch { center = null; }
+    }
+  });
+  return center;
 }
 
 /**

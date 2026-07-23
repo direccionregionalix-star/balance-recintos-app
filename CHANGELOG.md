@@ -3,6 +3,15 @@
 Registro de versiones. El número visible aparece en el encabezado de la app
 (fuente única: `src/version.js`).
 
+## v1.5.0
+- **Propuestas de nuevos recintos (v1.4c):** importa la Plantilla 2 y dibuja
+  los candidatos como rombos en el mapa (coloreados por estado). Ficha editable
+  por propuesta: estado, capacidad (mesas), recintos que descongestiona (alivio)
+  y observación; con líneas al/los recinto(s) que alivia. Persistente en
+  `br_propuestas`.
+- **Simulación what-if:** toggle "Simular propuestas aprobadas" que traslada la
+  demanda descongestionada de los recintos y recalcula el balance en vivo.
+
 ## v1.4.0
 - **Importador de fichas de capacidad (v1.4a):** carga masiva de la planilla de
   fichas comunales; cruce por `cod_recinto` tolerante a ceros a la izquierda;

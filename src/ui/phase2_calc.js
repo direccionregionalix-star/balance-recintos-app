@@ -13,7 +13,7 @@ import {
   uniqueComunas,
   uniqueRecintos,
 } from '../services/dataProcessing.js';
-import { fmt, escapeHtml, getComuna, getRecintoName } from '../utils/helpers.js';
+import { fmt, escapeHtml, getComuna, getRecintoName, normalizeCode } from '../utils/helpers.js';
 import {
   applyResultStyles,
   filterMapVisibility,
@@ -44,14 +44,30 @@ export function mountPhase2(container) {
   filtersContainer.style.marginTop = '15px';
   filtersContainer.style.display = 'none';
 
+  // Toggle what-if (v1.4c): simular propuestas aprobadas.
+  const whatif = el('label', 'whatif-toggle hidden');
+  whatif.innerHTML =
+    '<input type="checkbox" id="whatif-check"> Simular propuestas aprobadas (descongestión)';
+
   const kpis = el('div', 'kpi-grid');
   const resultsHost = el('div', 'results-list');
   const resultsHead = el('div', 'results-head hidden');
   resultsHead.innerHTML = '<span>Estado por recinto</span>';
 
-  // Orden de jerarquía: controles → filtros → KPIs → lista de tarjetas.
-  // Los filtros quedan JUSTO ENCIMA de los KPI para que gobiernen la vista.
-  body.append(controls, dynamicInputs, filtersContainer, kpis, resultsHead, resultsHost);
+  // Orden de jerarquía: controles → filtros → what-if → KPIs → lista de tarjetas.
+  body.append(controls, dynamicInputs, filtersContainer, whatif, kpis, resultsHead, resultsHost);
+
+  whatif.querySelector('#whatif-check').addEventListener('change', (e) => {
+    setState({ simularPropuestas: e.target.checked });
+    recompute();
+    const n = (getState().backend.propuestas || []).filter((p) => p.estado === 'aprobado').length;
+    showToast(
+      e.target.checked
+        ? `Simulando ${n} propuesta(s) aprobada(s).`
+        : 'Simulación desactivada.',
+      'info'
+    );
+  });
 
   // Enlace Mapa -> Tabla: el mapa necesita conocer este contenedor de tarjetas.
   setResultsHost(resultsHost);
@@ -212,8 +228,9 @@ export function mountPhase2(container) {
     // --------------------------------
 
     const overrides = buildOverrides(st);
+    const relief = buildRelief(st);
     const { results, totals } = runCalculation(
-      st.filteredFeatures, st.filters.keyColumn, st.calc, overrides
+      st.filteredFeatures, st.filters.keyColumn, st.calc, overrides, relief
     );
     setState({ results, totals });
     patchBranch('calc', { done: true });
@@ -252,13 +269,38 @@ export function mountPhase2(container) {
     return ov;
   }
 
+  /**
+   * Mapa de descongestión para el what-if: por cada propuesta 'aprobada',
+   * suma las mesas de alivio al recinto correspondiente. Vacío si la
+   * simulación está apagada.
+   */
+  function buildRelief(st) {
+    if (!st.simularPropuestas) return {};
+    const idByCode = new Map();
+    for (const f of st.filteredFeatures) {
+      const id = getFeatureId(f, st.filters.keyColumn);
+      if (id !== null) idByCode.set(normalizeCode(id), id);
+    }
+    const relief = {};
+    for (const p of st.backend?.propuestas || []) {
+      if (p.estado !== 'aprobado') continue;
+      for (const a of p.alivio || []) {
+        const fid = idByCode.get(normalizeCode(a.cod));
+        const mesas = Number(a.mesas) || 0;
+        if (fid && mesas > 0) relief[fid] = (relief[fid] || 0) + mesas;
+      }
+    }
+    return relief;
+  }
+
   /** Recalcula con las ediciones online vigentes y refresca la vista. */
   function recompute() {
     const st = getState();
     if (!st.calc.done) return;
     const overrides = buildOverrides(st);
+    const relief = buildRelief(st);
     const { results, totals } = runCalculation(
-      st.filteredFeatures, st.filters.keyColumn, st.calc, overrides
+      st.filteredFeatures, st.filters.keyColumn, st.calc, overrides, relief
     );
     setState({ results, totals });
     applyResultStyles(results);
@@ -396,7 +438,11 @@ export function mountPhase2(container) {
       resultsHead.classList.add('hidden');
     }
 
-    // Recalcula cuando cambian las ediciones/observaciones online.
+    // Muestra el toggle what-if cuando ya hay cálculo y existen propuestas.
+    const hayPropuestas = (state.backend?.propuestas || []).length > 0;
+    whatif.classList.toggle('hidden', !(state.calc.done && hayPropuestas));
+
+    // Recalcula cuando cambian las ediciones/observaciones/propuestas online.
     if (state.calc.done && state.backendVersion !== lastBackendVersion) {
       lastBackendVersion = state.backendVersion;
       recompute();
