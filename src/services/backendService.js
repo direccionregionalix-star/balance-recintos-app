@@ -69,6 +69,28 @@ export async function upsertEdicion(codRecinto, patch, autor) {
   }
 }
 
+/**
+ * Inserta/actualiza muchas ediciones de una vez (importación de fichas).
+ * @param {Array<Object>} list filas { cod_recinto, capacidad_real, ... }
+ * @returns {Promise<Array>} filas resultantes (vacío si falla)
+ */
+export async function bulkUpsertEdiciones(list) {
+  if (!backendDisponible || !Array.isArray(list) || !list.length) return [];
+  try {
+    const now = new Date().toISOString();
+    const payload = list.map((x) => ({ ...x, actualizado_en: now }));
+    const { data, error } = await supabase
+      .from('br_ediciones')
+      .upsert(payload, { onConflict: 'cod_recinto' })
+      .select();
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('[backend] bulkUpsertEdiciones:', err.message);
+    return [];
+  }
+}
+
 /** Agrega una observación a un recinto. Devuelve la fila creada o null. */
 export async function addObservacion({ codRecinto, comentario, esSolucion, autor }) {
   if (!backendDisponible) return null;
