@@ -106,18 +106,19 @@ export function recintoLabels(properties, id) {
  * expone `data-recinto-id` para el enlace bidireccional Mapa ↔ Tabla.
  */
 export function resultCard({
-  id, properties, value, status, statusLabel, color, a, b, aLabel, bLabel, onClick,
+  id, properties, value, status, statusLabel, color, a, b, aLabel, bLabel, onClick, edited,
 }) {
   const card = el('div', `result-card status-${status}`);
   card.style.setProperty('--status-color', color);
   card.dataset.recintoId = id;
 
   const { title, subtitle } = recintoLabels(properties, id);
+  const editedBadge = edited ? '<span class="edited-badge" title="Editado en línea">✎</span>' : '';
 
   card.innerHTML = `
     <div class="result-top">
       <div class="result-titles">
-        <span class="result-name">${escapeHtml(title)}</span>
+        <span class="result-name">${editedBadge}${escapeHtml(title)}</span>
         ${subtitle ? `<span class="result-sub">${escapeHtml(subtitle)}</span>` : ''}
       </div>
       <span class="result-chip" style="background:${color}22;color:${color}">${escapeHtml(statusLabel)}</span>

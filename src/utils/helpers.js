@@ -135,3 +135,17 @@ export function getComuna(properties) {
     'municipio', '__recintoComuna',
   ]);
 }
+
+/** Latitud del recinto (número) desde el cruce o el GeoJSON, o null. */
+export function getLat(properties) {
+  const v = pickProp(properties, ['__lat', 'latitud', 'lat', 'latitude', 'y']);
+  const n = toNumber(v);
+  return n !== null && n >= -90 && n <= 90 ? n : null;
+}
+
+/** Longitud del recinto (número) desde el cruce o el GeoJSON, o null. */
+export function getLon(properties) {
+  const v = pickProp(properties, ['__lon', 'longitud', 'lon', 'lng', 'longitude', 'x']);
+  const n = toNumber(v);
+  return n !== null && n >= -180 && n <= 180 ? n : null;
+}

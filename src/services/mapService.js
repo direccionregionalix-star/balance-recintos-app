@@ -11,14 +11,18 @@ import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 
 import { STATUS, getFeatureId } from './dataProcessing.js';
+import { getLat, getLon } from '../utils/helpers.js';
 
 let map = null;
 let geoLayer = null; // capa de recintos (GeoJSON)
+let pointsLayer = null; // capa de puntos de ubicacion (coordenadas del recinto)
 let drawnLayer = null; // ultimo poligono dibujado (Fase 4)
 let currentKeyColumn = null;
 let currentResults = null; // ultimo resultado del calculo (para recolorear)
 let onDrawEnd = null; // callback (geojsonPolygon) => void
+let onFeatureSelect = null; // callback (id) => void al seleccionar un recinto
 let resultsHostRef = null; // contenedor de tarjetas del panel (enlace Mapa -> Tabla)
+let pointRenderer = null; // renderer SVG dedicado para los puntos de ubicacion
 
 /** Inicializa el mapa base sobre un contenedor. */
 export function initMap(containerId = 'map') {
@@ -35,6 +39,9 @@ export function initMap(containerId = 'map') {
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap',
   }).addTo(map);
+
+  // Renderer SVG para los puntos (los polígonos usan canvas por rendimiento).
+  pointRenderer = L.svg();
 
   initDrawTools();
   return map;
@@ -67,18 +74,57 @@ export function renderFeatures(features, keyColumn) {
       const id = getFeatureId(feature, keyColumn);
       layer.__recintoId = id;
       layer.bindPopup(buildPopup(feature, keyColumn));
-      // Enlace Mapa -> Tabla: al hacer clic en el poligono, desplazamos y
-      // destacamos la tarjeta correspondiente en el panel lateral.
-      layer.on('click', () => scrollToCard(id));
+      // Enlace Mapa -> Tabla + apertura de la ficha del recinto.
+      layer.on('click', () => {
+        scrollToCard(id);
+        if (typeof onFeatureSelect === 'function') onFeatureSelect(id);
+      });
     },
   }).addTo(map);
 
+  renderPoints(features, keyColumn);
+
   fitToLayer();
+}
+
+/**
+ * Dibuja un punto (circleMarker) en la coordenada real de cada recinto, para
+ * verificar su ubicación. Se colorea luego según el estado del cálculo.
+ */
+export function renderPoints(features, keyColumn) {
+  if (!map) return;
+  if (pointsLayer) {
+    pointsLayer.remove();
+    pointsLayer = null;
+  }
+  const markers = [];
+  for (const f of features || []) {
+    const lat = getLat(f.properties);
+    const lon = getLon(f.properties);
+    if (lat === null || lon === null) continue; // sin coordenada -> se omite
+    const id = getFeatureId(f, keyColumn);
+    const m = L.circleMarker([lat, lon], { ...pointStyle('sinDato'), renderer: pointRenderer });
+    m.__recintoId = id;
+    m.bindTooltip(String(id ?? ''), { direction: 'top' });
+    m.on('click', () => {
+      scrollToCard(id);
+      if (typeof onFeatureSelect === 'function') onFeatureSelect(id);
+    });
+    markers.push(m);
+  }
+  if (markers.length) {
+    pointsLayer = L.layerGroup(markers).addTo(map);
+  }
 }
 
 /** Registra el contenedor de tarjetas para el enlace Mapa -> Tabla. */
 export function setResultsHost(node) {
   resultsHostRef = node;
+}
+
+/** Registra el callback que abre la ficha del recinto al seleccionarlo. */
+export function setOnFeatureSelect(cb) {
+  onFeatureSelect = cb;
 }
 
 /**
@@ -145,6 +191,20 @@ export function filterMapVisibility(ids) {
     }
   });
 
+  // Espeja la visibilidad en la capa de puntos.
+  if (pointsLayer) {
+    pointsLayer.eachLayer((m) => {
+      const id = m.__recintoId;
+      if (!set) {
+        m.setStyle(pointStyle(currentResults?.[id]?.status || 'sinDato'));
+      } else if (set.has(String(id))) {
+        m.setStyle(pointStyle(currentResults?.[id]?.status || 'sinDato'));
+      } else {
+        m.setStyle({ opacity: 0.1, fillOpacity: 0.05 });
+      }
+    });
+  }
+
   if (set) {
     if (selected.length) {
       try {
@@ -187,6 +247,26 @@ export function applyResultStyles(results) {
       layer.setPopupContent(buildPopup(layer.feature, currentKeyColumn, r));
     }
   });
+  // Recolorea los puntos de ubicación según el estado.
+  if (pointsLayer) {
+    pointsLayer.eachLayer((m) => {
+      const id = m.__recintoId;
+      m.setStyle(pointStyle((id != null && results[id]?.status) || 'sinDato'));
+    });
+  }
+}
+
+/** Estilo del punto de ubicación según el estado. */
+function pointStyle(status) {
+  const c = STATUS[status]?.color || STATUS.sinDato.color;
+  return {
+    radius: 5,
+    color: '#ffffff',
+    weight: 1.5,
+    opacity: 1,
+    fillColor: c,
+    fillOpacity: 1,
+  };
 }
 
 /** Resalta un subconjunto de recintos (seleccion espacial) y atenua el resto. */

@@ -24,6 +24,8 @@ const initialState = () => ({
     valueColumn: null,
     nameColumn: null, // columna del Excel con el nombre del recinto
     comunaColumn: null, // columna del Excel con la comuna
+    latColumn: null, // columna de latitud
+    lonColumn: null, // columna de longitud
   },
   joined: false,
   joinStats: { matched: 0, total: 0 },
@@ -46,11 +48,19 @@ const initialState = () => ({
     statusFilter: '', // aislar solo "sobrecupo" / "holgura" / etc.
   },
 
-  results: {}, 
-  totals: null, 
+  results: {},
+  totals: null,
 
   // ---- Fase 4: seleccion espacial ----
-  spatialSelection: null, 
+  spatialSelection: null,
+
+  // ---- Colaboracion online (Supabase) ----
+  session: { nombre: '' }, // identidad simple por sesion
+  backend: {
+    ediciones: {}, // cod_recinto -> { capacidad_real, conteo, estado_override, actualizado_por, actualizado_en }
+    observaciones: {}, // cod_recinto -> [ { id, comentario, es_solucion, autor, creado_en } ]
+  },
+  backendVersion: 0, // se incrementa para forzar recálculo tras un cambio online
 });
 
 let state = initialState();

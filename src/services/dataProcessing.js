@@ -55,6 +55,7 @@ export const STATUS = {
   holgura: { color: '#16a34a', label: 'Con Espacio (Holgura)' },
   limite: { color: '#eab308', label: 'Al Límite' },
   sobrecupo: { color: '#dc2626', label: 'Déficit (Sobrecupo)' },
+  resuelto: { color: '#7c3aed', label: 'Con solución propuesta' },
   neutral: { color: '#3b82f6', label: 'Visualización' },
   sinDato: { color: '#cbd5e1', label: 'Sin dato' },
 };
@@ -83,7 +84,7 @@ export function filterByRegion(geojson, regionColumn, regionValue) {
 }
 
 export function joinExcel(features, excel, geoKeyColumn) {
-  const { rows, keyColumn, valueColumn, nameColumn, comunaColumn } = excel;
+  const { rows, keyColumn, valueColumn, nameColumn, comunaColumn, latColumn, lonColumn } = excel;
   const total = features.length;
   let matched = 0;
 
@@ -107,6 +108,8 @@ export function joinExcel(features, excel, geoKeyColumn) {
     // Limpia atributos descriptivos de un cruce previo (re-ejecutable).
     delete f.properties.__recintoNombre;
     delete f.properties.__recintoComuna;
+    delete f.properties.__lat;
+    delete f.properties.__lon;
 
     const k = normalizeKey(f.properties?.[geoKeyColumn]);
     if (k === null) continue;
@@ -124,6 +127,13 @@ export function joinExcel(features, excel, geoKeyColumn) {
     }
     if (comunaColumn && row[comunaColumn] != null && String(row[comunaColumn]).trim() !== '') {
       f.properties.__recintoComuna = String(row[comunaColumn]).trim();
+    }
+    // Coordenadas del recinto (para el punto de ubicación en el mapa).
+    if (latColumn && row[latColumn] != null && String(row[latColumn]).trim() !== '') {
+      f.properties.__lat = row[latColumn];
+    }
+    if (lonColumn && row[lonColumn] != null && String(row[lonColumn]).trim() !== '') {
+      f.properties.__lon = row[lonColumn];
     }
 
     f.properties.__joinMatched = true;
@@ -159,51 +169,55 @@ export function detectNumericFields(features) {
 /**
  * Motor de cálculo electoral.
  * Soporta modo 'symbology' (solo pintar colores) y 'electoral' (calcular escenarios).
+ *
+ * @param {Object} [overrides] mapa cod_recinto -> { capacidad_real, conteo, resuelto }
+ *        Las ediciones online reemplazan los valores del archivo y `resuelto`
+ *        fuerza el color/estado "Con solución propuesta".
  */
-export function runCalculation(features, keyColumn, calc) {
+export function runCalculation(features, keyColumn, calc, overrides = {}) {
   const { mode, varCapacidad, isTables, varConteo, electorsPerTable } = calc;
   const results = {};
   const agg = {
     count: 0, sumCapacidad: 0, sumConteo: 0, sumBalance: 0,
-    holgura: 0, limite: 0, sobrecupo: 0, neutral: 0, sinDato: 0,
+    holgura: 0, limite: 0, sobrecupo: 0, resuelto: 0, neutral: 0, sinDato: 0,
   };
 
   for (const f of features) {
     const id = getFeatureId(f, keyColumn);
     if (id === null) continue;
 
-    const rawCap = toNumber(f.properties?.[varCapacidad]);
+    const ov = overrides?.[id] || null;
+
+    // La edición online de "capacidad real" reemplaza el valor del archivo.
+    const rawCap =
+      ov && ov.capacidad_real != null
+        ? toNumber(ov.capacidad_real)
+        : toNumber(f.properties?.[varCapacidad]);
 
     if (rawCap === null) {
-      results[id] = { value: null, status: 'sinDato', mesasRestantes: null };
+      results[id] = { value: null, status: 'sinDato', mesasRestantes: null, overridden: !!ov };
       agg.sinDato++;
       continue;
     }
 
     if (mode === 'symbology') {
-      // Solo visualización. Asignamos neutral para que el mapa gradúe por opacidad.
-      results[id] = { value: rawCap, status: 'neutral', rawCap };
+      results[id] = { value: rawCap, status: 'neutral', rawCap, overridden: !!ov };
       agg.count++;
       agg.neutral++;
       continue;
     }
 
     // MODO ESCENARIO ELECTORAL
-    const conteo = toNumber(f.properties?.[varConteo]);
+    const conteo =
+      ov && ov.conteo != null ? toNumber(ov.conteo) : toNumber(f.properties?.[varConteo]);
     if (conteo === null) {
-      results[id] = { value: null, status: 'sinDato', mesasRestantes: null };
+      results[id] = { value: null, status: 'sinDato', mesasRestantes: null, overridden: !!ov };
       agg.sinDato++;
       continue;
     }
 
-    // 1. Determinar cuántas mesas físicas soporta realmente el local
-    // Si el dato base viene en electores (ej. 4000), asumimos histórico de 400 por mesa = 10 mesas.
-    const mesasFisicas = isTables ? rawCap : Math.floor(rawCap / 400); 
-    
-    // 2. Capacidad máxima real bajo el NUEVO umbral de la ley
+    const mesasFisicas = isTables ? rawCap : Math.floor(rawCap / 400);
     const capacidadSimuladaElectores = mesasFisicas * electorsPerTable;
-    
-    // 3. Balance: Cuántos sobran o faltan
     const balanceElectores = capacidadSimuladaElectores - conteo;
     const balanceMesas = balanceElectores / electorsPerTable;
 
@@ -211,13 +225,17 @@ export function runCalculation(features, keyColumn, calc) {
     if (balanceElectores > 0) status = 'holgura';
     if (balanceElectores === 0) status = 'limite';
 
-    results[id] = { 
-      value: balanceElectores, 
-      status, 
-      capacidadSimulada: capacidadSimuladaElectores, 
+    // Si hay una solución propuesta en las observaciones, se recolorea.
+    if (ov && ov.resuelto) status = 'resuelto';
+
+    results[id] = {
+      value: balanceElectores,
+      status,
+      capacidadSimulada: capacidadSimuladaElectores,
       mesasFisicas,
       mesasRestantes: balanceMesas,
-      conteo 
+      conteo,
+      overridden: !!(ov && (ov.capacidad_real != null || ov.conteo != null)),
     };
 
     agg.count++;
@@ -238,7 +256,7 @@ export function getFeatureId(feature, keyColumn) {
 }
 
 export function aggregateSubset(results, ids) {
-  const agg = { count: 0, sumCapacidad: 0, sumConteo: 0, sumBalance: 0, holgura: 0, limite: 0, sobrecupo: 0, neutral: 0, sinDato: 0 };
+  const agg = { count: 0, sumCapacidad: 0, sumConteo: 0, sumBalance: 0, holgura: 0, limite: 0, sobrecupo: 0, resuelto: 0, neutral: 0, sinDato: 0 };
   for (const id of ids) {
     const r = results[id];
     if (!r || r.status === 'sinDato' || r.value === null) {
@@ -248,7 +266,7 @@ export function aggregateSubset(results, ids) {
     agg.sumCapacidad += r.capacidadSimulada || 0;
     agg.sumConteo += r.conteo || 0;
     agg.sumBalance += r.value || 0;
-    agg[r.status]++;
+    if (agg[r.status] !== undefined) agg[r.status]++;
   }
   return agg;
 }
