@@ -50,6 +50,19 @@ export function normalizeKey(value) {
   return s === '' ? null : s.toLowerCase();
 }
 
+/**
+ * Normaliza un código de recinto tolerando ceros a la izquierda:
+ * '02662' y '2662' se consideran iguales. Útil para cruzar planillas
+ * (que suelen perder el cero) contra la capa cargada.
+ */
+export function normalizeCode(value) {
+  if (value === null || value === undefined) return null;
+  const s = String(value).trim();
+  if (s === '') return null;
+  const noZeros = s.replace(/^0+/, '');
+  return (noZeros === '' ? '0' : noZeros).toLowerCase();
+}
+
 /** Formatea un numero para mostrar (separador de miles, N decimales). */
 export function fmt(value, decimals = 2) {
   const n = toNumber(value);

@@ -14,12 +14,15 @@ import { mountPhase2 } from './ui/phase2_calc.js';
 import { mountPhase3 } from './ui/phase3_export.js';
 import { mountPhase4 } from './ui/phase4_spatial.js';
 import { mountRecintoDetail, openRecinto } from './ui/recintoDetail.js';
+import { mountFichasImport } from './ui/fichasImport.js';
 import { fetchEdiciones, fetchObservaciones, backendDisponible } from './services/backendService.js';
 import { showToast } from './ui/uiComponents.js';
+import { VERSION } from './version.js';
 
 function bootstrap() {
   // 0) Identidad simple por sesión (para trazar quién edita/observa).
   ensureSessionName();
+  showVersion();
 
   // 1) Mapa base.
   initMap('map');
@@ -27,6 +30,7 @@ function bootstrap() {
   // 2) Paneles de control (35% derecha).
   const panel = document.getElementById('panel-scroll');
   mountPhase1(panel);
+  mountFichasImport(panel); // v1.4a: actualización de capacidad por fichas
   mountPhase2(panel);
   mountPhase4(panel); // seleccion espacial
   mountPhase3(panel); // exportacion al final del flujo
@@ -42,6 +46,12 @@ function bootstrap() {
   window.requestAnimationFrame(() => {
     window.dispatchEvent(new Event('resize'));
   });
+}
+
+/** Muestra la versión en el encabezado (única fuente: version.js). */
+function showVersion() {
+  const sub = document.querySelector('.app-header .subtitle');
+  if (sub) sub.textContent = `Análisis espacial & capacidad electoral · v${VERSION}`;
 }
 
 /** Pide (una vez) el nombre del funcionario y lo recuerda en el navegador. */
