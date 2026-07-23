@@ -187,12 +187,12 @@ export function runCalculation(features, keyColumn, calc, overrides = {}) {
     if (id === null) continue;
 
     const ov = overrides?.[id] || null;
+    // La capacidad ingresada por un humano (ficha comunal o edición manual) es
+    // SIEMPRE en mesas: fija directamente las mesas físicas, sin ÷400 ni toggle.
+    const capOverrideMesas = ov && ov.capacidad_real != null ? toNumber(ov.capacidad_real) : null;
 
-    // La edición online de "capacidad real" reemplaza el valor del archivo.
-    const rawCap =
-      ov && ov.capacidad_real != null
-        ? toNumber(ov.capacidad_real)
-        : toNumber(f.properties?.[varCapacidad]);
+    // Valor base del archivo (solo se usa si no hay override humano).
+    const rawCap = capOverrideMesas !== null ? capOverrideMesas : toNumber(f.properties?.[varCapacidad]);
 
     if (rawCap === null) {
       results[id] = { value: null, status: 'sinDato', mesasRestantes: null, overridden: !!ov };
@@ -216,7 +216,9 @@ export function runCalculation(features, keyColumn, calc, overrides = {}) {
       continue;
     }
 
-    const mesasFisicas = isTables ? rawCap : Math.floor(rawCap / 400);
+    // Mesas físicas: el override es mesas directas; el archivo respeta el toggle.
+    const mesasFisicas =
+      capOverrideMesas !== null ? capOverrideMesas : (isTables ? rawCap : Math.floor(rawCap / 400));
     const capacidadSimuladaElectores = mesasFisicas * electorsPerTable;
     const balanceElectores = capacidadSimuladaElectores - conteo;
     const balanceMesas = balanceElectores / electorsPerTable;
