@@ -122,7 +122,7 @@ function render() {
     <div class="modal-section">
       <h4>Editar datos del recinto</h4>
       <div class="edit-grid">
-        <label>Capacidad real
+        <label>Capacidad real (mesas)
           <input type="number" id="edit-cap" value="${capActual}" placeholder="${r.mesasFisicas != null ? 'del archivo' : ''}">
         </label>
         <label>Conteo (demanda)
