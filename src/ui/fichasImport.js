@@ -84,24 +84,25 @@ export function mountFichasImport(container) {
         if (k !== null) index.set(k, { feature: f, id });
       }
 
-      const matched = [];
-      const unmatched = [];
-      let skipped = 0;
+      const toApply = []; // cruza y tiene valor -> se aplica
+      const unmatched = []; // código no existe en la capa
+      let matchedNoValue = 0; // cruza pero sin capacidad escrita aún
 
       for (const row of rows) {
-        const cap = toNumber(row[capCol]);
         const codRaw = row[codCol];
-        if (cap === null) {
-          skipped++; // sin capacidad -> no se toca
-          continue;
-        }
         const k = normalizeCode(codRaw);
         const hit = k !== null ? index.get(k) : null;
         if (!hit) {
-          unmatched.push(String(codRaw ?? '').trim());
+          // Solo reporta como "sin coincidencia" si la fila trae algún código.
+          if (k !== null) unmatched.push(String(codRaw ?? '').trim());
           continue;
         }
-        matched.push({
+        const cap = toNumber(row[capCol]);
+        if (cap === null) {
+          matchedNoValue++; // cruza, pero falta llenar la capacidad
+          continue;
+        }
+        toApply.push({
           id: hit.id, // id real de la capa (para escribir la edición)
           codigo: String(codRaw ?? '').trim(),
           capacidad: cap,
@@ -111,7 +112,7 @@ export function mountFichasImport(container) {
         });
       }
 
-      parsed = { matched, unmatched, skipped };
+      parsed = { toApply, unmatched, matchedNoValue };
       renderPreview();
     } catch (err) {
       console.error(err);
@@ -122,15 +123,24 @@ export function mountFichasImport(container) {
   function renderPreview() {
     preview.innerHTML = '';
     if (!parsed) return;
-    const { matched, unmatched, skipped } = parsed;
+    const { toApply, unmatched, matchedNoValue } = parsed;
 
     const resumen = el('div', 'fichas-stats');
     resumen.innerHTML = `
-      <span class="ok">${matched.length} cruzan</span>
+      <span class="ok">${toApply.length} para aplicar</span>
+      <span class="muted">${matchedNoValue} cruzan sin valor</span>
       <span class="warn">${unmatched.length} sin coincidencia</span>
-      <span class="muted">${skipped} sin valor (ignoradas)</span>
     `;
     preview.appendChild(resumen);
+
+    // Guía cuando los códigos cruzan pero falta escribir la capacidad.
+    if (!toApply.length && matchedNoValue > 0) {
+      const tip = el('p', 'hint');
+      tip.innerHTML =
+        `Los códigos <b>sí cruzan</b> (${matchedNoValue}). Falta llenar la columna ` +
+        `<b>CAPACIDAD_REAL_DEFINIDA_jefe</b> en las filas que quieras actualizar y volver a subir el archivo.`;
+      preview.appendChild(tip);
+    }
 
     if (unmatched.length) {
       const u = el('details', 'fichas-unmatched');
@@ -140,12 +150,12 @@ export function mountFichasImport(container) {
       preview.appendChild(u);
     }
 
-    if (matched.length) {
+    if (toApply.length) {
       const list = el('div', 'fichas-matched');
-      list.innerHTML = matched
+      list.innerHTML = toApply
         .slice(0, 8)
         .map((m) => `<div><b>${escapeHtml(m.codigo)}</b> → ${m.capacidad} mesas</div>`)
-        .join('') + (matched.length > 8 ? `<div class="muted">…y ${matched.length - 8} más</div>` : '');
+        .join('') + (toApply.length > 8 ? `<div class="muted">…y ${toApply.length - 8} más</div>` : '');
       preview.appendChild(list);
 
       if (!backendDisponible) {
@@ -154,7 +164,7 @@ export function mountFichasImport(container) {
         preview.appendChild(w);
       } else {
         const btn = createButton({
-          label: `Aplicar ${matched.length} actualizaciones`,
+          label: `Aplicar ${toApply.length} actualizaciones`,
           variant: 'accent',
           onClick: apply,
         });
@@ -165,11 +175,11 @@ export function mountFichasImport(container) {
   }
 
   async function apply() {
-    if (!parsed || !parsed.matched.length) return;
+    if (!parsed || !parsed.toApply.length) return;
     const st = getState();
     const autor = `${st.session?.nombre || 'anónimo'} · ficha`;
 
-    const ediciones = parsed.matched.map((m) => ({
+    const ediciones = parsed.toApply.map((m) => ({
       cod_recinto: String(m.id),
       capacidad_real: m.capacidad,
       actualizado_por: autor,
@@ -183,7 +193,7 @@ export function mountFichasImport(container) {
     }
 
     // Deja trazabilidad como observación en las filas que traen texto/potencial.
-    for (const m of parsed.matched) {
+    for (const m of parsed.toApply) {
       const notas = [];
       if (m.potencial !== '' && m.potencial != null) notas.push(`Potencial gimnasio: ${m.potencial} mesas`);
       if (m.fecha !== '' && m.fecha != null) notas.push(`Ficha: ${m.fecha}`);
