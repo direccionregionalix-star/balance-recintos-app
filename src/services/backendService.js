@@ -126,4 +126,68 @@ export async function deleteObservacion(id) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Propuestas de nuevos recintos (v1.4c)
+// ---------------------------------------------------------------------------
+
+/** Carga todas las propuestas. */
+export async function fetchPropuestas() {
+  if (!backendDisponible) return [];
+  try {
+    const { data, error } = await supabase
+      .from('br_propuestas')
+      .select('*')
+      .order('creado_en', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('[backend] fetchPropuestas:', err.message);
+    return [];
+  }
+}
+
+/** Inserta varias propuestas (importación de la Plantilla 2). */
+export async function bulkInsertPropuestas(list) {
+  if (!backendDisponible || !Array.isArray(list) || !list.length) return [];
+  try {
+    const { data, error } = await supabase.from('br_propuestas').insert(list).select();
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('[backend] bulkInsertPropuestas:', err.message);
+    return [];
+  }
+}
+
+/** Actualiza una propuesta (estado, capacidad, alivio, observación). */
+export async function updatePropuesta(id, patch) {
+  if (!backendDisponible) return null;
+  try {
+    const { data, error } = await supabase
+      .from('br_propuestas')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.warn('[backend] updatePropuesta:', err.message);
+    return null;
+  }
+}
+
+/** Elimina una propuesta. */
+export async function deletePropuesta(id) {
+  if (!backendDisponible) return false;
+  try {
+    const { error } = await supabase.from('br_propuestas').delete().eq('id', id);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.warn('[backend] deletePropuesta:', err.message);
+    return false;
+  }
+}
+
 export { backendDisponible };

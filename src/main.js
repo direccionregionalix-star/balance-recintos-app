@@ -8,14 +8,21 @@
 import './styles/main.css';
 
 import { getState, setState } from './state/store.js';
-import { initMap, setOnFeatureSelect } from './services/mapService.js';
+import { initMap, setOnFeatureSelect, setOnPropuestaSelect, renderPropuestas } from './services/mapService.js';
 import { mountPhase1 } from './ui/phase1_load.js';
 import { mountPhase2 } from './ui/phase2_calc.js';
 import { mountPhase3 } from './ui/phase3_export.js';
 import { mountPhase4 } from './ui/phase4_spatial.js';
 import { mountRecintoDetail, openRecinto } from './ui/recintoDetail.js';
 import { mountFichasImport } from './ui/fichasImport.js';
-import { fetchEdiciones, fetchObservaciones, backendDisponible } from './services/backendService.js';
+import { mountPropuestasImport } from './ui/propuestasImport.js';
+import { mountPropuestaDetail, openPropuesta } from './ui/propuestaDetail.js';
+import {
+  fetchEdiciones,
+  fetchObservaciones,
+  fetchPropuestas,
+  backendDisponible,
+} from './services/backendService.js';
 import { showToast } from './ui/uiComponents.js';
 import { VERSION } from './version.js';
 
@@ -33,11 +40,14 @@ function bootstrap() {
   mountFichasImport(panel); // v1.4a: actualización de capacidad por fichas
   mountPhase2(panel);
   mountPhase4(panel); // seleccion espacial
+  mountPropuestasImport(panel); // v1.4c: candidatos para descongestionar
   mountPhase3(panel); // exportacion al final del flujo
 
-  // 3) Ficha del recinto (modal de observaciones/edición) + enlace desde el mapa.
+  // 3) Fichas modales + enlaces desde el mapa.
   mountRecintoDetail();
+  mountPropuestaDetail();
   setOnFeatureSelect(openRecinto);
+  setOnPropuestaSelect(openPropuesta);
 
   // 4) Carga inicial de datos colaborativos (no bloquea el arranque).
   loadBackend();
@@ -84,15 +94,17 @@ async function loadBackend() {
     return;
   }
   try {
-    const [ediciones, observaciones] = await Promise.all([
+    const [ediciones, observaciones, propuestas] = await Promise.all([
       fetchEdiciones(),
       fetchObservaciones(),
+      fetchPropuestas(),
     ]);
     const st = getState();
     setState({
-      backend: { ediciones, observaciones },
+      backend: { ediciones, observaciones, propuestas },
       backendVersion: st.backendVersion + 1,
     });
+    renderPropuestas(propuestas); // dibuja los candidatos existentes
   } catch (err) {
     console.warn('[main] loadBackend:', err);
   }

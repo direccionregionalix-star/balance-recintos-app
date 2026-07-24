@@ -59,8 +59,12 @@ const initialState = () => ({
   backend: {
     ediciones: {}, // cod_recinto -> { capacidad_real, conteo, estado_override, actualizado_por, actualizado_en }
     observaciones: {}, // cod_recinto -> [ { id, comentario, es_solucion, autor, creado_en } ]
+    propuestas: [], // [ { id, nombre, comuna, lat, lon, capacidad_mesas, estado, alivio, ... } ]
   },
   backendVersion: 0, // se incrementa para forzar recálculo tras un cambio online
+
+  // ---- v1.4c: simulación de propuestas (what-if) ----
+  simularPropuestas: false, // si true, las propuestas 'aprobado' descongestionan
 });
 
 let state = initialState();
